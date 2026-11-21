@@ -1,15 +1,13 @@
-# Render Blueprint Specification for FIT3D Web Application
-# Because FIT3D is a static React + Vite + Three.js SPA backed by Firebase BaaS
-# (no custom Node/Express backend server exists in this repository),
-# Render Static Site is the recommended zero-maintenance deployment target.
-
 services:
   - type: web
     name: fit3d-web
     runtime: static
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22
     headers:
       - path: /*
         name: X-Frame-Options
