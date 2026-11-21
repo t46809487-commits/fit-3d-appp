@@ -1,0 +1,8 @@
+{
+  "name": "FIT3D - 3D Exercise Guide & Workout Coach",
+  "description": "Interactive 3D exercise encyclopedia, real-time biomechanics muscle viewer, personalized workout routines, boxing combat trainer, and progress tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

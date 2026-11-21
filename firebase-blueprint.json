@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with fitness goals and stats",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 256 },
+        "goal": { "type": "string", "maxLength": 50 },
+        "fitnessLevel": { "type": "string", "maxLength": 30 },
+        "workoutLocation": { "type": "string", "maxLength": 30 },
+        "equipment": { "type": "string", "maxLength": 50 },
+        "availableTime": { "type": "string", "maxLength": 20 },
+        "targetBodyParts": { "type": "string", "maxLength": 100 },
+        "streak": { "type": "number" },
+        "totalWorkouts": { "type": "number" },
+        "totalMinutes": { "type": "number" },
+        "totalCalories": { "type": "number" },
+        "weightKg": { "type": "number" },
+        "heightCm": { "type": "number" },
+        "xp": { "type": "number" },
+        "preferredCharacter": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "goal", "fitnessLevel"]
+    },
+    "WorkoutLog": {
+      "title": "WorkoutLog",
+      "description": "Log entry for a completed or recorded workout session",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "workoutName": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "durationSeconds": { "type": "number" },
+        "caloriesBurned": { "type": "number" },
+        "exerciseCount": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["logId", "userId", "workoutName", "durationSeconds", "caloriesBurned"]
+    },
+    "FavoriteExercise": {
+      "title": "FavoriteExercise",
+      "description": "Bookmarked exercise by a user",
+      "type": "object",
+      "properties": {
+        "exerciseId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "exerciseName": { "type": "string", "maxLength": 100 },
+        "bodyPart": { "type": "string", "maxLength": 50 },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["exerciseId", "userId", "exerciseName"]
+    },
+    "CustomWorkout": {
+      "title": "CustomWorkout",
+      "description": "User created custom workout routine",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 300 },
+        "exerciseIds": { "type": "string", "maxLength": 1000 },
+        "estimatedDuration": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "title"]
+    },
+    "Exercise": {
+      "title": "Exercise",
+      "description": "Exercise catalog item created by admin or system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "bodyPart": { "type": "string", "maxLength": 50 },
+        "difficulty": { "type": "string", "maxLength": 30 },
+        "equipment": { "type": "string", "maxLength": 50 },
+        "primaryMuscles": { "type": "string", "maxLength": 200 },
+        "secondaryMuscles": { "type": "string", "maxLength": 200 },
+        "instructions": { "type": "string", "maxLength": 2000 },
+        "commonMistakes": { "type": "string", "maxLength": 1000 },
+        "breathingPattern": { "type": "string", "maxLength": 200 },
+        "animationId": { "type": "string", "maxLength": 60 },
+        "animationType": { "type": "string", "maxLength": 50 },
+        "characterId": { "type": "string", "maxLength": 30 },
+        "tempo": { "type": "string", "maxLength": 20 },
+        "reps": { "type": "number" },
+        "sets": { "type": "number" },
+        "restSeconds": { "type": "number" },
+        "caloriesEstimate": { "type": "number" },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "bodyPart", "difficulty"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile document"
+    },
+    "/users/{userId}/workout_logs/{logId}": {
+      "schema": { "$ref": "#/entities/WorkoutLog" },
+      "description": "Workout logs for the user"
+    },
+    "/users/{userId}/favorites/{exerciseId}": {
+      "schema": { "$ref": "#/entities/FavoriteExercise" },
+      "description": "User bookmarked exercises"
+    },
+    "/users/{userId}/custom_workouts/{workoutId}": {
+      "schema": { "$ref": "#/entities/CustomWorkout" },
+      "description": "User custom routines"
+    },
+    "/exercises/{exerciseId}": {
+      "schema": { "$ref": "#/entities/Exercise" },
+      "description": "Global exercise catalog"
+    }
+  }
+}
