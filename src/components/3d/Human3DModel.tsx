@@ -114,9 +114,9 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     const width = container.clientWidth || 360;
     const heightPx = container.clientHeight || 440;
 
-    // Deep Navy/Black Studio Gradient
+    // Light neutral studio background (PRD visual language)
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0d14);
+    scene.background = new THREE.Color(0xe9ebee);
 
     // Perspective Camera: 38 deg FOV framing full body with safe margins
     const camera = new THREE.PerspectiveCamera(38, width / heightPx, 0.1, 100);
@@ -141,37 +141,37 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     container.appendChild(renderer.domElement);
 
     // Controlled Studio Lighting (Key, Fill, Rim, Ambient)
-    const ambientLight = new THREE.AmbientLight(0xd9e4f5, 0.90);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
     scene.add(ambientLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
     keyLight.position.set(2.5, 3.5, 3.0);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
     scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.65);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.55);
     fillLight.position.set(-2.8, 1.6, 2.2);
     scene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight(0xf97316, 1.25);
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.50);
     rimLight.position.set(0, 3.0, -3.2);
     scene.add(rimLight);
 
     // Studio Pedestal & Contact Shadow Floor (Grounded at y = -0.90)
     const floorGeo = new THREE.PlaneGeometry(8, 8);
-    const floorMat = new THREE.ShadowMaterial({ opacity: 0.35 });
+    const floorMat = new THREE.ShadowMaterial({ opacity: 0.18 });
     const shadowFloor = new THREE.Mesh(floorGeo, floorMat);
     shadowFloor.rotation.x = -Math.PI / 2;
     shadowFloor.position.y = -0.905;
     shadowFloor.receiveShadow = true;
     scene.add(shadowFloor);
 
-    // Dark podium with cyan guide ring
+    // Light podium with orange accent ring (PRD: one strong accent color)
     const platform = new THREE.Mesh(
       new THREE.CylinderGeometry(1.2, 1.3, 0.08, 40),
-      new THREE.MeshStandardMaterial({ color: 0x131824, roughness: 0.7, metalness: 0.2 })
+      new THREE.MeshStandardMaterial({ color: 0xd3d6da, roughness: 0.8, metalness: 0.0 })
     );
     platform.position.y = -0.945;
     platform.receiveShadow = true;
@@ -179,7 +179,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
     const guideRing = new THREE.Mesh(
       new THREE.RingGeometry(1.16, 1.20, 48),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.4 })
+      new THREE.MeshBasicMaterial({ color: 0xf97316, side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
     );
     guideRing.rotation.x = Math.PI / 2;
     guideRing.position.y = -0.903;
