@@ -214,9 +214,9 @@ export async function createCharacterInstance(
     // Setup vertex colors buffer on Beta_Surface
     const colorsArray = new Float32Array(vertCount * 3);
     for (let i = 0; i < vertCount * 3; i += 3) {
-      colorsArray[i] = 0.13;     // R
-      colorsArray[i + 1] = 0.16; // G
-      colorsArray[i + 2] = 0.22; // B: Neutral matte graphite base (#222938)
+      colorsArray[i] = 0.62;     // R
+      colorsArray[i + 1] = 0.63; // G
+      colorsArray[i + 2] = 0.65; // B: Neutral light-gray mannequin base (PRD anatomical style)
     }
     const colorAttribute = new THREE.BufferAttribute(colorsArray, 3);
     skinnedSurface.geometry.setAttribute('color', colorAttribute);
@@ -224,8 +224,8 @@ export async function createCharacterInstance(
     // Clean PBR Skin & Materials (satin skin response, no harsh plastic shine)
     skinnedSurface.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.40,
-      metalness: 0.15,
+      roughness: 0.60,
+      metalness: 0.0,
       side: THREE.DoubleSide,
     });
 
@@ -233,9 +233,9 @@ export async function createCharacterInstance(
     const skinnedJoints = jointsMesh as THREE.SkinnedMesh | null;
     if (skinnedJoints) {
       skinnedJoints.material = new THREE.MeshStandardMaterial({
-        color: 0x1a212e,
-        roughness: 0.42,
-        metalness: 0.18,
+        color: 0x9ea0a5,
+        roughness: 0.60,
+        metalness: 0.0,
       });
     }
 
@@ -703,10 +703,10 @@ export function updateMuscleHighlights(
   const colorAttr = char.colorAttribute;
   const muscleMap = char.muscleVertexIndices;
 
-  // Base neutral matte graphite (#222938)
-  const baseR = 0.13;
-  const baseG = 0.16;
-  const baseB = 0.22;
+  // Base neutral light-gray mannequin (PRD: neutral gray body)
+  const baseR = 0.62;
+  const baseG = 0.63;
+  const baseB = 0.65;
 
   for (let i = 0; i < colorAttr.count; i++) {
     colorAttr.setXYZ(i, baseR, baseG, baseB);
@@ -724,14 +724,14 @@ export function updateMuscleHighlights(
     const isSecondary = isMatched(muscleKey, secondaryList);
 
     if (isPrimary) {
-      // Fiery glowing orange-red (#ff3d00)
+      // Primary muscle: strong orange-red (PRD highlight)
       for (const idx of indices) {
-        colorAttr.setXYZ(idx, 1.0, 0.24, 0.0);
+        colorAttr.setXYZ(idx, 1.0, 0.30, 0.10);
       }
     } else if (isSecondary) {
-      // Warm amber glow highlight (#f59e0b)
+      // Secondary muscle: lower-intensity soft orange (PRD)
       for (const idx of indices) {
-        colorAttr.setXYZ(idx, 0.96, 0.62, 0.04);
+        colorAttr.setXYZ(idx, 0.97, 0.66, 0.50);
       }
     }
   });
