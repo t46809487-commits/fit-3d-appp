@@ -2,7 +2,7 @@ services:
   - type: web
     name: fit3d-web
     runtime: static
-    buildCommand:    buildCommand: npm install --legacy-peer-deps && npm run build
+    buildCommand: npm install --legacy-peer-deps && npm run build
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
     envVars:
