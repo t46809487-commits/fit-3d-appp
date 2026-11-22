@@ -25,6 +25,23 @@ interface Human3DModelProps {
   onStateChange?: (state: AnimationState) => void;
 }
 
+// ---------------------------------------------------------------------------
+// PRD Section 11 - 3D Model States: IDLE -> START -> MOVEMENT -> END -> REVERSE -> REPEAT
+// One rep = one full cycle. Cycle length matches the old sine wave (2*PI in animTime units).
+// phase: 0 = start posture, 1 = end posture (peak contraction).
+// ---------------------------------------------------------------------------
+const smoothStep = (x: number) => x * x * (3 - 2 * x);
+
+const getCycleInfo = (t: number): { phase: number; state: AnimationState } => {
+  const x = ((t / (Math.PI * 2)) % 1 + 1) % 1; // 0..1 position inside one rep
+  if (x < 0.10) return { phase: 0, state: 'IDLE' };
+  if (x < 0.20) return { phase: 0, state: 'START_POSITION' };
+  if (x < 0.50) return { phase: smoothStep((x - 0.20) / 0.30), state: 'ECCENTRIC_LOAD' };
+  if (x < 0.65) return { phase: 1, state: 'PEAK_CONTRACTION' };
+  if (x < 0.95) return { phase: 1 - smoothStep((x - 0.65) / 0.30), state: 'CONCENTRIC_RETURN' };
+  return { phase: 0, state: 'REP_COMPLETE' };
+};
+
 export const Human3DModel: React.FC<Human3DModelProps> = ({
   primaryMuscles = [],
   secondaryMuscles = [],
@@ -261,15 +278,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       const char = stateRef.current.char;
 
       if (char) {
-        // Phase calculation [0 to 1]
-        const phase = (Math.sin(t) + 1) / 2;
-        const derivative = Math.cos(t);
-
-        let currentState: AnimationState = 'START_POSITION';
-        if (derivative > 0.25) currentState = 'ECCENTRIC_LOAD';
-        else if (phase > 0.85) currentState = 'PEAK_CONTRACTION';
-        else if (derivative < -0.25) currentState = 'CONCENTRIC_RETURN';
-        else if (phase < 0.15) currentState = 'REP_COMPLETE';
+        // Phase + state from the PRD 6-state cycle [phase: 0 to 1]
+        const { phase, state: currentState } = getCycleInfo(t);
 
         setAnimState(currentState);
         if (onStateChange) onStateChange(currentState);
