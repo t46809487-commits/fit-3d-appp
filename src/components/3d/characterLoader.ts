@@ -3,6 +3,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MuscleName, CharacterModelId, AvatarConfiguration } from '../../types';
 import { createAnatomicalHumanRig } from './anatomicalRig';
+import { EXERCISE_MOTIONS } from './exercisePoses';
+import { applyMotion } from './poseEngine';
 
 export interface LoadedCharacter {
   scene: THREE.Group;
@@ -364,6 +366,14 @@ export function applyExerciseKinematics(
   t: number
 ) {
   resetBonesToRest(char);
+
+  // Pose-based exercises (start pose -> end pose, verified joint angles)
+  const motion = EXERCISE_MOTIONS[animationType];
+  if (motion) {
+    applyMotion(char, motion, phase);
+    return;
+  }
+
   const b = char.bones;
   const init = char.initialTransforms;
 
