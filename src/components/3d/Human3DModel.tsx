@@ -185,6 +185,16 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     guideRing.position.y = -0.903;
     scene.add(guideRing);
 
+    // Step / bench prop (shown only for exercises that rest hands or feet on one)
+    const propBox = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0xaeb2b8, roughness: 0.8, metalness: 0.0 })
+    );
+    propBox.visible = false;
+    propBox.castShadow = true;
+    propBox.receiveShadow = true;
+    scene.add(propBox);
+
     stateRef.current.renderer = renderer;
     stateRef.current.scene = scene;
     stateRef.current.camera = camera;
@@ -287,6 +297,21 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         // Apply joint kinematics to connected humanoid character
         applyExerciseKinematics(char, animationType, phase, t);
       }
+
+      // Step / bench prop and camera focus for floor exercises (set by the pose engine)
+      const plat = char
+        ? (char.scene.userData.platform as { x: number; z: number; height: number; yaw: number } | undefined)
+        : undefined;
+      if (plat) {
+        propBox.visible = true;
+        propBox.scale.set(0.55, plat.height, 0.42);
+        propBox.position.set(plat.x, -0.905 + plat.height / 2, plat.z);
+        propBox.rotation.y = plat.yaw;
+      } else {
+        propBox.visible = false;
+      }
+      const focusY = char ? ((char.scene.userData.focusY as number | undefined) ?? 0.05) : 0.05;
+      stateRef.current.targetLookAt.y += (focusY - stateRef.current.targetLookAt.y) * 0.08;
 
       // Smooth camera interpolation
       camera.position.lerp(stateRef.current.targetCamPos, 0.09);
