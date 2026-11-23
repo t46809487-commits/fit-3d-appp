@@ -30,8 +30,16 @@ export type PoseDef = Record<string, JointAngles>;
 export interface MotionDef {
   start: PoseDef;
   end: PoseDef;
+  /** Optional middle pose (reached at phase 0.5) for exercises that pass through a third position. */
+  mid?: PoseDef;
+  /** Bones that must NOT be used to find the floor level (e.g. knees/feet in a hovering leg drive). */
+  ignoreContact?: string[];
+  /** Overhead bar (pull-ups): bar height in metres above the floor. The body hangs from it. */
+  bar?: number;
   /** Whole-body tilt about X in radians: [at start, at end]. 0 = standing, PI/2 = lying face-down. */
   pitch: [number, number];
+  /** Body tilt at the middle pose (only used together with `mid`). */
+  midPitch?: number;
   /** Whole-body turn about Y in radians (to show the exercise side-on from the default camera). */
   yaw: number;
   /** Whole-body roll about the front axis in radians (side-lying exercises). */
@@ -644,5 +652,217 @@ export const EXERCISE_MOTIONS: Record<string, MotionDef> = {
     },
     pitch: [0, 0],
     yaw: -0.4,
+  },
+  // ===== Leap-style form (clear start -> end loop, side-on view) =====
+  // Mountain climber: high plank, knees drive in alternately toward the chest (hands stay planted)
+  mountain_climber: {
+    start: {
+      arm: { x: -1.259, z: -1.52 },
+      foreArm: { y: 0 },
+      head: { x: -0.3 },
+      neck: { x: -0.12 },
+      upLegL: { x: -2.05 },
+      legL: { x: 2.5 },
+      upLegR: { x: 0 },
+      legR: { x: 0 },
+    },
+    mid: {
+      arm: { x: -1.259, z: -1.52 },
+      foreArm: { y: 0 },
+      head: { x: -0.3 },
+      neck: { x: -0.12 },
+      upLegL: { x: -0.6 },
+      legL: { x: 1.5 },
+      upLegR: { x: -0.6 },
+      legR: { x: 1.5 },
+    },
+    end: {
+      arm: { x: -1.259, z: -1.52 },
+      foreArm: { y: 0 },
+      head: { x: -0.3 },
+      neck: { x: -0.12 },
+      upLegL: { x: 0 },
+      legL: { x: 0 },
+      upLegR: { x: -2.05 },
+      legR: { x: 2.5 },
+    },
+    pitch: [1.259, 1.259],
+    yaw: -1.0,
+    ignoreContact: ['LeftLeg', 'RightLeg', 'LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase'],
+  },
+  // Jumping jacks: feet together + arms down  ->  feet wide + arms overhead
+  jumping_jacks: {
+    start: {
+      arm: { x: 0, z: -1.35 },
+      foreArm: { y: -0.1 },
+      upLeg: { z: 0 },
+    },
+    end: {
+      arm: { x: 0, z: 1.45 },
+      foreArm: { y: -0.05 },
+      upLeg: { z: 0.38 },
+      hips: { dy: -5.0 },
+    },
+    pitch: [0, 0],
+    yaw: -0.35,
+  },
+  // High knees: knee to hip height, alternating, opposite arm drives forward
+  high_knees: {
+    start: {
+      upLegL: { x: -1.5 },
+      legL: { x: 1.7 },
+      footL: { x: 0.25 },
+      upLegR: { x: 0.05 },
+      legR: { x: 0.15 },
+      footR: { x: -0.05 },
+      armL: { x: 0.55, z: -0.25 },
+      armR: { x: -0.9, z: -0.25 },
+      foreArm: { y: -1.55 },
+      spine: { x: 0.04 },
+      head: { x: 0 },
+    },
+    end: {
+      upLegL: { x: 0.05 },
+      legL: { x: 0.15 },
+      footL: { x: -0.05 },
+      upLegR: { x: -1.5 },
+      legR: { x: 1.7 },
+      footR: { x: 0.25 },
+      armL: { x: -0.9, z: -0.25 },
+      armR: { x: 0.55, z: -0.25 },
+      foreArm: { y: -1.55 },
+      spine: { x: 0.04 },
+      head: { x: 0 },
+    },
+    pitch: [0, 0],
+    yaw: -0.9,
+  },
+  // Superman: lie face-down, arms forward; lift arms, chest and legs off the floor together
+  superman: {
+    start: {
+      arm: { x: 0, z: 1.5 },
+      foreArm: { y: 0 },
+      head: { x: 0 },
+      upLeg: { x: 0 },
+      leg: { x: 0 },
+      foot: { x: 1.571 },
+      spine: { x: 0 },
+      spine1: { x: 0 },
+      spine2: { x: 0 },
+    },
+    end: {
+      arm: { x: -0.55, z: 1.5 },
+      foreArm: { y: 0 },
+      head: { x: -0.3 },
+      neck: { x: -0.15 },
+      upLeg: { x: 0.45 },
+      leg: { x: 0 },
+      foot: { x: 1.571 },
+      spine: { x: -0.22 },
+      spine1: { x: -0.22 },
+      spine2: { x: -0.2 },
+    },
+    pitch: [1.57, 1.57],
+    yaw: -1.0,
+  },
+  // Glute bridge: lie on back, knees bent, heels planted; lift hips until shoulders-hips-knees are one line
+  glute_bridge: {
+    start: {
+      upLeg: { x: -0.8 },
+      leg: { x: 1.77 },
+      foot: { x: -0.01 },
+      arm: { x: 0.05, z: -1.25 },
+      foreArm: { y: -0.05 },
+      head: { x: 0 },
+    },
+    end: {
+      upLeg: { x: -0.2 },
+      leg: { x: 1.5 },
+      foot: { x: 0.003 },
+      hips: { dz: 37.671 },
+      spine: { x: -0.171 },
+      spine1: { x: -0.171 },
+      spine2: { x: -0.086 },
+      arm: { x: 0.786, z: -1.115 },
+      foreArm: { y: -0.05 },
+      head: { x: 0 },
+    },
+    pitch: [-1.571, -1.723],
+    yaw: 2.142,
+  },
+  // Bench tricep dips: hands on a bench behind you, feet on the floor; bend elbows to ~90 degrees and press up
+  tricep_dips: {
+    start: {
+      hips: { dy: -39.391 },
+      upLeg: { x: -1.433 },
+      leg: { x: 1.366 },
+      foot: { x: -0.285 },
+      arm: { x: 0.118, z: -1.571 },
+      foreArm: { y: -0.12 },
+      spine: { x: 0.027 },
+      spine1: { x: 0.016 },
+      spine2: { x: 0.008 },
+      head: { x: 0 },
+      neck: { x: 0 },
+    },
+    end: {
+      hips: { dy: -61.391 },
+      upLeg: { x: -1.936 },
+      leg: { x: 1.809 },
+      foot: { x: -0.285 },
+      arm: { x: 1.083, z: -1.571 },
+      foreArm: { y: -1.851 },
+      spine: { x: 0 },
+      spine1: { x: 0 },
+      spine2: { x: 0 },
+      head: { x: 0 },
+      neck: { x: 0 },
+    },
+    pitch: [0, 0],
+    yaw: -1.57,
+    raise: { hand: 0.45 },
+  },
+  // Burpee: squat with hands on the floor  ->  feet kick back to a plank (hands stay planted)
+  burpee: {
+    start: {
+      hips: { dy: -65.175, dz: -19.654 },
+      upLeg: { x: -2.6 },
+      leg: { x: 1.84 },
+      foot: { x: -0.904 },
+      arm: { x: -1.6, z: -1.2 },
+      foreArm: { y: 0 },
+      spine: { x: 0.325 },
+      spine1: { x: 0.325 },
+      spine2: { x: 0.162 },
+      head: { x: -0.2 },
+      neck: { x: 0 },
+    },
+    mid: {
+      hips: { dy: -70.006, dz: -60.0 },
+      upLeg: { x: -1.815 },
+      leg: { x: 2.608 },
+      foot: { x: -1.4 },
+      arm: { x: -1.8, z: -1.4 },
+      foreArm: { y: 0 },
+      spine: { x: 0.23 },
+      spine1: { x: 0.23 },
+      spine2: { x: 0.115 },
+      head: { x: -0.2 },
+      neck: { x: 0 },
+    },
+    end: {
+      arm: { x: -1.259, z: -1.52 },
+      foreArm: { y: 0 },
+      head: { x: -0.3 },
+      neck: { x: -0.12 },
+      upLeg: { x: 0 },
+      leg: { x: 0 },
+      foot: { x: 0 },
+      hips: { dy: -76.803, dz: -37.645 },
+    },
+    pitch: [0.827, 1.259],
+    midPitch: 1.329,
+    yaw: -1.0,
+    ignoreContact: ['LeftLeg', 'RightLeg', 'Hips', 'Spine2', 'Head', 'LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase'],
   },
 };
