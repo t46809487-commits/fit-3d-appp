@@ -32,7 +32,7 @@ import {
   FitnessGoal 
 } from './types';
 import { EXERCISES_DATABASE } from './data/exercises';
-import { PRESET_WORKOUTS, generateWorkoutPlan } from './data/workouts';
+import { PRESET_WORKOUTS, CATEGORY_WORKOUTS, generateWorkoutPlan } from './data/workouts';
 import { getDefaultAvatarConfig } from './data/subscriptions';
 
 import { BottomNav, TabType } from './components/navigation/BottomNav';
@@ -551,46 +551,97 @@ export default function App() {
         )}
 
         {activeTab === 'workout' && (
-          <div className="space-y-6 pb-28 animate-fade-in">
+          <div className="space-y-8 pb-28 animate-fade-in">
             <div className="space-y-1 pt-2">
               <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                Workout Routines
+                Workouts
               </h1>
               <p className="text-neutral-400 text-xs sm:text-sm">
-                Select a guided 3D session or launch today's tailored plan
+                Pick a body part. Every exercise of that muscle group is included, done in 2 rounds.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {PRESET_WORKOUTS.map((routine) => (
-                <div
-                  key={routine.id}
-                  className="rounded-3xl bg-neutral-900 border border-neutral-800 p-5 space-y-4 hover:border-neutral-700 transition flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-neutral-400">
-                      <span className="font-bold text-orange-400">{routine.category}</span>
-                      <span>{routine.level}</span>
+            {/* Body-part workouts */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-black uppercase tracking-wider text-orange-400">Body Part Workouts</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {CATEGORY_WORKOUTS.map((routine) => (
+                  <div
+                    key={routine.id}
+                    className="rounded-3xl bg-neutral-900 border border-neutral-800 overflow-hidden hover:border-neutral-700 transition flex flex-col"
+                  >
+                    <div className={`bg-gradient-to-br ${routine.bannerGradient} p-5 space-y-2`}>
+                      <div className="flex items-center justify-between text-xs text-neutral-300">
+                        <span className="text-2xl">{routine.emoji}</span>
+                        <span className="font-bold">{routine.level}</span>
+                      </div>
+                      <h3 className="text-xl font-black text-white">{routine.title}</h3>
+                      <p className="text-xs text-neutral-300">{routine.subtitle}</p>
+                      <div className="flex items-center gap-3 text-xs text-neutral-200 font-mono pt-1">
+                        <span>⏱️ {routine.durationMinutes} min</span>
+                        <span>🔥 {routine.caloriesEstimate} kcal</span>
+                        <span>🏋️ {routine.exercises.length} moves</span>
+                      </div>
                     </div>
 
-                    <h3 className="text-xl font-black text-white">{routine.title}</h3>
-                    <p className="text-xs text-neutral-400">{routine.subtitle}</p>
+                    <div className="p-4 space-y-3">
+                      <details className="group">
+                        <summary className="cursor-pointer text-xs font-bold text-neutral-300 hover:text-white select-none">
+                          View {routine.uniqueNames.length} exercises
+                        </summary>
+                        <ol className="mt-2 space-y-1 text-xs text-neutral-400 list-decimal list-inside">
+                          {routine.uniqueNames.map((name) => (
+                            <li key={name}>{name}</li>
+                          ))}
+                        </ol>
+                      </details>
 
-                    <div className="flex items-center gap-3 text-xs text-neutral-300 font-mono pt-1">
-                      <span>⏱️ {routine.durationMinutes} min</span>
-                      <span>🔥 {routine.caloriesEstimate} kcal</span>
-                      <span>🏋️ {routine.exercises.length} moves</span>
+                      <button
+                        onClick={() => setActiveWorkout(routine)}
+                        className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-orange-500 hover:text-white text-neutral-200 text-xs font-black uppercase tracking-wider transition active:scale-95"
+                      >
+                        Start {routine.title}
+                      </button>
                     </div>
                   </div>
+                ))}
+              </div>
+            </div>
 
-                  <button
-                    onClick={() => setActiveWorkout(routine)}
-                    className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-orange-500 hover:text-white text-neutral-200 text-xs font-black uppercase tracking-wider transition active:scale-95"
+            {/* Quick routines */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-black uppercase tracking-wider text-orange-400">Quick Routines</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {PRESET_WORKOUTS.map((routine) => (
+                  <div
+                    key={routine.id}
+                    className="rounded-3xl bg-neutral-900 border border-neutral-800 p-5 space-y-4 hover:border-neutral-700 transition flex flex-col justify-between"
                   >
-                    Start Routine
-                  </button>
-                </div>
-              ))}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-neutral-400">
+                        <span className="font-bold text-orange-400">{routine.category}</span>
+                        <span>{routine.level}</span>
+                      </div>
+
+                      <h3 className="text-xl font-black text-white">{routine.title}</h3>
+                      <p className="text-xs text-neutral-400">{routine.subtitle}</p>
+
+                      <div className="flex items-center gap-3 text-xs text-neutral-300 font-mono pt-1">
+                        <span>⏱️ {routine.durationMinutes} min</span>
+                        <span>🔥 {routine.caloriesEstimate} kcal</span>
+                        <span>🏋️ {routine.exercises.length} moves</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setActiveWorkout(routine)}
+                      className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-orange-500 hover:text-white text-neutral-200 text-xs font-black uppercase tracking-wider transition active:scale-95"
+                    >
+                      Start Routine
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
