@@ -18,7 +18,7 @@ export const PRESET_WORKOUTS: WorkoutRoutine[] = [
       EXERCISES_DATABASE.find(e => e.id === 'EX017')!, // Mountain Climbers
       EXERCISES_DATABASE.find(e => e.id === 'EX001')!, // Push Up
       EXERCISES_DATABASE.find(e => e.id === 'EX019')!, // High Knees
-      EXERCISES_DATABASE.find(e => e.id === 'MB001')!, // Cat-cow (cooldown)
+      EXERCISES_DATABASE.find(e => e.id === 'EX066')!, // Cat-Cow (cooldown)
     ].filter(Boolean)
   },
   {
@@ -85,8 +85,8 @@ export const PRESET_WORKOUTS: WorkoutRoutine[] = [
     caloriesEstimate: 95,
     bannerGradient: 'from-emerald-500/20 via-teal-600/30 to-cyan-600/20',
     exercises: [
-      EXERCISES_DATABASE.find(e => e.id === 'MB001')!, // Cat-Cow
-      EXERCISES_DATABASE.find(e => e.id === 'MB002')!, // Shoulder circles
+      EXERCISES_DATABASE.find(e => e.id === 'EX066')!, // Cat-Cow
+      EXERCISES_DATABASE.find(e => e.id === 'EX071')!, // Arm Circles (shoulder mobility)
       EXERCISES_DATABASE.find(e => e.id === 'EX007')!, // Gentle bodyweight squat
     ].filter(Boolean)
   }
@@ -120,7 +120,7 @@ export function generateWorkoutPlan(
   const hasWarmup = selectedExercises.some(e => e.category === 'Mobility' || e.name.includes('Jumping') || e.name.includes('Cat-Cow'));
   if (!hasWarmup && selectedExercises.length > 0) {
     const warmup = goal === 'Mobility' 
-      ? EXERCISES_DATABASE.find(e => e.id === 'MB001') 
+      ? EXERCISES_DATABASE.find(e => e.id === 'EX066') 
       : EXERCISES_DATABASE.find(e => e.id === 'EX018');
     if (warmup && !selectedExercises.includes(warmup)) {
       selectedExercises.unshift(warmup);
