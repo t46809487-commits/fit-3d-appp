@@ -11,6 +11,8 @@ export interface LoadedCharacter {
   surfaceMesh: THREE.SkinnedMesh;
   jointsMesh?: THREE.SkinnedMesh;
   colorAttribute: THREE.BufferAttribute;
+  /** Per-vertex base colours (skin / top / shorts / shoes / hair) the muscle highlight resets to. */
+  baseColors?: Float32Array;
   muscleVertexIndices: Map<string, number[]>;
   bones: Record<string, THREE.Bone>;
   initialTransforms: {
@@ -18,6 +20,57 @@ export interface LoadedCharacter {
     rotations: Map<string, THREE.Euler>;
   };
   isProceduralFallback?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Stylised "workout app" look: skin tone, tank top, shorts, shoes and hair instead of the
+// plain grey mannequin. Each vertex is coloured by the bone that moves it most (skin
+// weights), so it stays correct in every pose.
+// ---------------------------------------------------------------------------
+const STYLE = {
+  skin: new THREE.Color(0xe9ab8d),
+  top: new THREE.Color(0x3b9bd6),
+  shorts: new THREE.Color(0x1f2430),
+  shoe: new THREE.Color(0x2b2f3a),
+  hair: new THREE.Color(0x6b6f76),
+};
+
+function classifyVertex(boneName: string, x: number, y: number, z: number): THREE.Color {
+  const side = boneName.replace(/^mixamorig:?/, '').replace(/^(Left|Right)/, '');
+  if (/^(Foot|ToeBase|Toe_End)/.test(side)) return STYLE.shoe;
+  if (side === 'Hips') return STYLE.shorts;
+  if (side === 'UpLeg') return y > 0.62 ? STYLE.shorts : STYLE.skin;
+  if (side === 'Spine') return y < 0.97 ? STYLE.shorts : STYLE.top;
+  if (side === 'Spine1' || side === 'Spine2') return STYLE.top;
+  if (side === 'Shoulder') return Math.abs(x) < 0.19 ? STYLE.top : STYLE.skin;
+  if (side === 'Head' || side === 'HeadTop_End') {
+    return y > 1.66 || (y > 1.6 && z < -0.03) ? STYLE.hair : STYLE.skin;
+  }
+  return STYLE.skin;
+}
+
+function buildStylizedColors(mesh: THREE.SkinnedMesh): Float32Array {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const sIdx = geo.attributes.skinIndex;
+  const sW = geo.attributes.skinWeight;
+  const out = new Float32Array(pos.count * 3);
+  const skelBones = mesh.skeleton ? mesh.skeleton.bones : [];
+  for (let i = 0; i < pos.count; i++) {
+    let c: THREE.Color = STYLE.skin;
+    if (sIdx && sW && skelBones.length) {
+      const idx = [sIdx.getX(i), sIdx.getY(i), sIdx.getZ(i), sIdx.getW(i)];
+      const w = [sW.getX(i), sW.getY(i), sW.getZ(i), sW.getW(i)];
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (w[k] > w[best]) best = k;
+      const boneName = skelBones[idx[best]]?.name ?? '';
+      c = classifyVertex(boneName, pos.getX(i), pos.getY(i), pos.getZ(i));
+    }
+    out[i * 3] = c.r;
+    out[i * 3 + 1] = c.g;
+    out[i * 3 + 2] = c.b;
+  }
+  return out;
 }
 
 let cachedGLTF: any = null;
@@ -214,19 +267,15 @@ export async function createCharacterInstance(
     }
 
     // Setup vertex colors buffer on Beta_Surface
-    const colorsArray = new Float32Array(vertCount * 3);
-    for (let i = 0; i < vertCount * 3; i += 3) {
-      colorsArray[i] = 0.62;     // R
-      colorsArray[i + 1] = 0.63; // G
-      colorsArray[i + 2] = 0.65; // B: Neutral light-gray mannequin base (PRD anatomical style)
-    }
+    const colorsArray = buildStylizedColors(skinnedSurface);
+    const baseColors = new Float32Array(colorsArray);
     const colorAttribute = new THREE.BufferAttribute(colorsArray, 3);
     skinnedSurface.geometry.setAttribute('color', colorAttribute);
 
     // Clean PBR Skin & Materials (satin skin response, no harsh plastic shine)
     skinnedSurface.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.60,
+      roughness: 0.75,
       metalness: 0.0,
       side: THREE.DoubleSide,
     });
@@ -234,10 +283,15 @@ export async function createCharacterInstance(
     // Seamlessly match joints mesh to surface so there are no floating pieces or contrasting robot bands
     const skinnedJoints = jointsMesh as THREE.SkinnedMesh | null;
     if (skinnedJoints) {
+      skinnedJoints.geometry.setAttribute(
+        'color',
+        new THREE.BufferAttribute(buildStylizedColors(skinnedJoints), 3)
+      );
       skinnedJoints.material = new THREE.MeshStandardMaterial({
-        color: 0x9ea0a5,
-        roughness: 0.60,
+        vertexColors: true,
+        roughness: 0.75,
         metalness: 0.0,
+        side: THREE.DoubleSide,
       });
     }
 
@@ -274,6 +328,7 @@ export async function createCharacterInstance(
       surfaceMesh,
       jointsMesh: jointsMesh || undefined,
       colorAttribute,
+      baseColors,
       muscleVertexIndices,
       bones,
       initialTransforms: {
@@ -713,13 +768,11 @@ export function updateMuscleHighlights(
   const colorAttr = char.colorAttribute;
   const muscleMap = char.muscleVertexIndices;
 
-  // Base neutral light-gray mannequin (PRD: neutral gray body)
-  const baseR = 0.62;
-  const baseG = 0.63;
-  const baseB = 0.65;
-
+  // Reset to the base look (skin / top / shorts ...); grey only for the procedural fallback rig
+  const base = char.baseColors;
   for (let i = 0; i < colorAttr.count; i++) {
-    colorAttr.setXYZ(i, baseR, baseG, baseB);
+    if (base) colorAttr.setXYZ(i, base[i * 3], base[i * 3 + 1], base[i * 3 + 2]);
+    else colorAttr.setXYZ(i, 0.62, 0.63, 0.65);
   }
 
   const isMatched = (mKey: string, list: MuscleName[]) => {
