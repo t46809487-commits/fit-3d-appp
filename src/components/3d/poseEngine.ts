@@ -59,99 +59,131 @@ function lerpPose(
   return out;
 }
 
+interface Placement {
+  x: number; y: number; z: number;
+  focusY: number;
+  platform?: { x: number; z: number; height: number; yaw: number };
+}
+
+// Body placement (centre, floor height, camera focus, step position) is worked out ONCE per
+// character + motion, then kept fixed. Before, it was recomputed every frame, which made the
+// whole body slide around while the exercise played.
+const placementCache = new WeakMap<LoadedCharacter, WeakMap<MotionDef, Placement>>();
+
 /**
  * Apply a pose-based motion (start pose -> end pose) to the character.
- * phase: 0 = start, 1 = end (peak). Also keeps the body resting on the floor
- * (or on a step/bench) and centred, and publishes camera/prop hints on
- * char.scene.userData (focusY, platform).
+ * phase: 0 = start, 1 = end (peak). Only the joints and the whole-body tilt change with phase;
+ * the body position stays fixed. Publishes camera/prop hints on char.scene.userData
+ * (focusY, platform), which are constant for a given exercise.
  */
 export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) {
   const bones = char.bones;
   const init = char.initialTransforms;
-  const getBone = (n: string) => bones['mixamorig' + n] || bones['mixamorig:' + n];
-
-  // 1) Joint angles (rest angles are read before any bone is changed)
-  const restOf = (key: string, comp: string): number => {
-    if (comp === 'dy' || comp === 'dz') return 0;
-    const target = resolveTargets(key)[0];
-    if (!target) return 0;
-    const bone = getBone(target[0]);
-    if (!bone) return 0;
-    const v = comp === 'x' ? bone.rotation.x : comp === 'y' ? bone.rotation.y : bone.rotation.z;
-    return comp === 'x' ? v : v * target[1];
-  };
-  const pose = lerpPose(m.start, m.end, phase, restOf);
-  Object.keys(pose).forEach((key) => {
-    const j = pose[key];
-    if (key === 'hips') {
-      const hips = getBone('Hips');
-      if (hips) {
-        hips.position.y = init.hipsPos.y + (j.dy ?? 0);
-        hips.position.z = init.hipsPos.z + (j.dz ?? 0);
-      }
-    }
-    resolveTargets(key).forEach(([name, sign]) => {
-      const bone = getBone(name);
-      if (!bone) return;
-      if (j.x !== undefined) bone.rotation.x = j.x;
-      if (j.y !== undefined) bone.rotation.y = sign * j.y;
-      if (j.z !== undefined) bone.rotation.z = sign * j.z;
-    });
-  });
-
-  // 2) Whole-body tilt + turn (pitch about X, then yaw about world Y)
   const scene = char.scene;
-  const pitch = lerp(m.pitch[0], m.pitch[1], phase);
-  scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, m.roll ?? 0, 'YXZ'));
-  scene.position.set(0, 0, 0);
-  scene.updateMatrixWorld(true);
-
-  // 3) Floor / step contact: rest the lowest body part on the floor
+  const getBone = (n: string) => bones['mixamorig' + n] || bones['mixamorig:' + n];
   const raise = m.raise ?? {};
   const v = new THREE.Vector3();
   const worldOf = (n: string): THREE.Vector3 | null => {
     const bn = getBone(n);
-    if (!bn) return null;
-    return bn.getWorldPosition(v).clone();
+    return bn ? bn.getWorldPosition(v).clone() : null;
   };
-  let minY = Infinity;
-  Object.keys(CONTACT_RADIUS).forEach((n) => {
-    const p = worldOf(n);
-    if (!p) return;
-    let r = CONTACT_RADIUS[n];
-    if (n.includes('Hand')) r += raise.hand ?? 0;
-    if (n.includes('Foot') || n.includes('Toe')) r += raise.foot ?? 0;
-    minY = Math.min(minY, p.y - r);
-  });
-  if (!isFinite(minY)) minY = 0;
 
-  // Centre the body horizontally around the head, feet and hands
-  const centreNames = ['Head', 'LeftFoot', 'RightFoot', 'LeftHand', 'RightHand'];
-  let cx = 0, cz = 0, cn = 0;
-  centreNames.forEach((n) => {
-    const p = worldOf(n);
-    if (p) { cx += p.x; cz += p.z; cn++; }
-  });
-  if (cn > 0) { cx /= cn; cz /= cn; }
-  scene.position.set(-cx, FLOOR_Y - minY, -cz);
-  scene.updateMatrixWorld(true);
-
-  // 4) Hints for the viewer: camera focus height and step/bench position
-  const head = worldOf('Head');
-  scene.userData.focusY = head ? Math.max(-0.6, Math.min(0.05, (head.y + FLOOR_Y) / 2)) : 0.05;
-
-  const stepHeight = raise.foot ?? raise.hand ?? 0;
-  if (stepHeight > 0) {
-    const names = raise.foot ? ['LeftToeBase', 'RightToeBase'] : ['LeftHand', 'RightHand'];
-    let px = 0, pz = 0, pn = 0;
-    names.forEach((n) => {
-      const p = worldOf(n);
-      if (p) { px += p.x; pz += p.z; pn++; }
+  // Joint angles + whole-body tilt/turn at a given phase (position is NOT touched here)
+  const poseBody = (ph: number) => {
+    const restOf = (key: string, comp: string): number => {
+      if (comp === 'dy' || comp === 'dz') return 0;
+      const target = resolveTargets(key)[0];
+      if (!target) return 0;
+      const bone = getBone(target[0]);
+      if (!bone) return 0;
+      const val = comp === 'x' ? bone.rotation.x : comp === 'y' ? bone.rotation.y : bone.rotation.z;
+      return comp === 'x' ? val : val * target[1];
+    };
+    const pose = lerpPose(m.start, m.end, ph, restOf);
+    Object.keys(pose).forEach((key) => {
+      const j = pose[key];
+      if (key === 'hips') {
+        const hips = getBone('Hips');
+        if (hips) {
+          hips.position.y = init.hipsPos.y + (j.dy ?? 0);
+          hips.position.z = init.hipsPos.z + (j.dz ?? 0);
+        }
+      }
+      resolveTargets(key).forEach(([name, sign]) => {
+        const bone = getBone(name);
+        if (!bone) return;
+        if (j.x !== undefined) bone.rotation.x = j.x;
+        if (j.y !== undefined) bone.rotation.y = sign * j.y;
+        if (j.z !== undefined) bone.rotation.z = sign * j.z;
+      });
     });
-    if (pn > 0) {
-      scene.userData.platform = { x: px / pn, z: pz / pn, height: stepHeight, yaw: m.yaw };
+    const pitch = lerp(m.pitch[0], m.pitch[1], ph);
+    scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, m.roll ?? 0, 'YXZ'));
+    scene.position.set(0, 0, 0);
+    scene.updateMatrixWorld(true);
+  };
+
+  let perChar = placementCache.get(char);
+  if (!perChar) { perChar = new WeakMap(); placementCache.set(char, perChar); }
+  let placement = perChar.get(m);
+
+  if (!placement) {
+    // Snapshot the rest state so every sample starts from the same bones
+    const snap = new Map<THREE.Bone, { rot: THREE.Euler; pos: THREE.Vector3 }>();
+    Object.values(bones).forEach((b) => snap.set(b, { rot: b.rotation.clone(), pos: b.position.clone() }));
+    const restore = () => snap.forEach((s, b) => { b.rotation.copy(s.rot); b.position.copy(s.pos); });
+
+    const SAMPLES = 9;
+    let minY = Infinity, sx = 0, sz = 0, sn = 0, headY = 0, hn = 0;
+    let px = 0, pz = 0, pn = 0;
+    const stepNames = raise.foot ? ['LeftToeBase', 'RightToeBase'] : ['LeftHand', 'RightHand'];
+    const stepHeight = raise.foot ?? raise.hand ?? 0;
+
+    for (let i = 0; i < SAMPLES; i++) {
+      restore();
+      poseBody(i / (SAMPLES - 1));
+      Object.keys(CONTACT_RADIUS).forEach((n) => {
+        const p = worldOf(n);
+        if (!p) return;
+        let r = CONTACT_RADIUS[n];
+        if (n.includes('Hand')) r += raise.hand ?? 0;
+        if (n.includes('Foot') || n.includes('Toe')) r += raise.foot ?? 0;
+        minY = Math.min(minY, p.y - r);
+      });
+      ['Head', 'LeftFoot', 'RightFoot', 'LeftHand', 'RightHand'].forEach((n) => {
+        const p = worldOf(n);
+        if (p) { sx += p.x; sz += p.z; sn++; }
+      });
+      const h = worldOf('Head');
+      if (h) { headY += h.y; hn++; }
+      if (stepHeight > 0) {
+        stepNames.forEach((n) => {
+          const p = worldOf(n);
+          if (p) { px += p.x; pz += p.z; pn++; }
+        });
+      }
     }
-  } else {
-    scene.userData.platform = undefined;
+    restore();
+
+    if (!isFinite(minY)) minY = 0;
+    const cx = sn > 0 ? sx / sn : 0;
+    const cz = sn > 0 ? sz / sn : 0;
+    const offY = FLOOR_Y - minY;
+    const headWorldY = hn > 0 ? headY / hn + offY : null;
+    placement = {
+      x: -cx, y: offY, z: -cz,
+      focusY: headWorldY !== null ? Math.max(-0.6, Math.min(0.05, (headWorldY + FLOOR_Y) / 2)) : 0.05,
+      platform: stepHeight > 0 && pn > 0
+        ? { x: px / pn - cx, z: pz / pn - cz, height: stepHeight, yaw: m.yaw }
+        : undefined,
+    };
+    perChar.set(m, placement);
   }
+
+  // Final pose for this frame, with the fixed placement
+  poseBody(phase);
+  scene.position.set(placement.x, placement.y, placement.z);
+  scene.updateMatrixWorld(true);
+  scene.userData.focusY = placement.focusY;
+  scene.userData.platform = placement.platform;
 }
