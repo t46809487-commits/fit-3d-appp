@@ -22,17 +22,37 @@ const CONTACT_RADIUS: Record<string, number> = {
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-function lerpPose(start: PoseDef, end: PoseDef, t: number): Record<string, JointAngles> {
+// Which bone(s) a pose key drives. "arm" = both arms (right side mirrored),
+// "armL" / "armR" = one side only (the value is written in left-side convention).
+function resolveTargets(key: string): Array<[string, number]> {
+  if (CENTER[key]) return [[CENTER[key], 1]];
+  if (SIDED[key]) return [['Left' + SIDED[key], 1], ['Right' + SIDED[key], -1]];
+  const base = key.slice(0, -1);
+  const side = key.slice(-1);
+  if (SIDED[base] && (side === 'L' || side === 'R')) {
+    return [[(side === 'L' ? 'Left' : 'Right') + SIDED[base], side === 'L' ? 1 : -1]];
+  }
+  return [];
+}
+
+function lerpPose(
+  start: PoseDef,
+  end: PoseDef,
+  t: number,
+  restOf: (key: string, comp: string) => number
+): Record<string, JointAngles> {
   const out: Record<string, JointAngles> = {};
   const keys = new Set([...Object.keys(start), ...Object.keys(end)]);
   keys.forEach((k) => {
-    const s = (start as Record<string, JointAngles>)[k] ?? (end as Record<string, JointAngles>)[k] ?? {};
-    const e = (end as Record<string, JointAngles>)[k] ?? s;
+    const s = start[k] ?? {};
+    const e = end[k] ?? {};
     const o: Record<string, number> = {};
     (['x', 'y', 'z', 'dy', 'dz'] as const).forEach((c) => {
-      const sv = s[c] ?? e[c];
-      const ev = e[c] ?? s[c];
-      if (sv !== undefined && ev !== undefined) o[c] = lerp(sv, ev, t);
+      if (s[c] === undefined && e[c] === undefined) return;
+      // A joint angle missing from one pose falls back to the rest angle
+      const sv = s[c] ?? restOf(k, c);
+      const ev = e[c] ?? restOf(k, c);
+      o[c] = lerp(sv, ev, t);
     });
     out[k] = o;
   });
@@ -50,8 +70,17 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
   const init = char.initialTransforms;
   const getBone = (n: string) => bones['mixamorig' + n] || bones['mixamorig:' + n];
 
-  // 1) Joint angles
-  const pose = lerpPose(m.start, m.end, phase);
+  // 1) Joint angles (rest angles are read before any bone is changed)
+  const restOf = (key: string, comp: string): number => {
+    if (comp === 'dy' || comp === 'dz') return 0;
+    const target = resolveTargets(key)[0];
+    if (!target) return 0;
+    const bone = getBone(target[0]);
+    if (!bone) return 0;
+    const v = comp === 'x' ? bone.rotation.x : comp === 'y' ? bone.rotation.y : bone.rotation.z;
+    return comp === 'x' ? v : v * target[1];
+  };
+  const pose = lerpPose(m.start, m.end, phase, restOf);
   Object.keys(pose).forEach((key) => {
     const j = pose[key];
     if (key === 'hips') {
@@ -61,13 +90,7 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
         hips.position.z = init.hipsPos.z + (j.dz ?? 0);
       }
     }
-    const targets: Array<[string, number]> = [];
-    if (CENTER[key]) targets.push([CENTER[key], 1]);
-    else if (SIDED[key]) {
-      targets.push(['Left' + SIDED[key], 1]);
-      targets.push(['Right' + SIDED[key], -1]);
-    }
-    targets.forEach(([name, sign]) => {
+    resolveTargets(key).forEach(([name, sign]) => {
       const bone = getBone(name);
       if (!bone) return;
       if (j.x !== undefined) bone.rotation.x = j.x;
@@ -79,7 +102,7 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
   // 2) Whole-body tilt + turn (pitch about X, then yaw about world Y)
   const scene = char.scene;
   const pitch = lerp(m.pitch[0], m.pitch[1], phase);
-  scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, 0, 'YXZ'));
+  scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, m.roll ?? 0, 'YXZ'));
   scene.position.set(0, 0, 0);
   scene.updateMatrixWorld(true);
 
