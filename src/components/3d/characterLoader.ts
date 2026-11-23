@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MuscleName, CharacterModelId, AvatarConfiguration } from '../../types';
 import { createAnatomicalHumanRig } from './anatomicalRig';
-import { EXERCISE_MOTIONS } from './exercisePoses';
+import { EXERCISE_MOTIONS, MOTION_ALIAS } from './exercisePoses';
 import { applyMotion } from './poseEngine';
 
 export interface LoadedCharacter {
@@ -423,7 +423,9 @@ export function applyExerciseKinematics(
   resetBonesToRest(char);
 
   // Pose-based exercises (start pose -> end pose, verified joint angles)
-  const motion = EXERCISE_MOTIONS[animationType];
+  // Several exercises (with different equipment) can share one motion
+  const animType = MOTION_ALIAS[animationType] ?? animationType;
+  const motion = EXERCISE_MOTIONS[animType];
   if (motion) {
     applyMotion(char, motion, phase);
     return;
@@ -453,7 +455,7 @@ export function applyExerciseKinematics(
   const lFoot = b.mixamorigLeftFoot || b['mixamorig:LeftFoot'] || b.footL;
   const rFoot = b.mixamorigRightFoot || b['mixamorig:RightFoot'] || b.footR;
 
-  switch (animationType) {
+  switch (animType) {
     case 'squat': {
       char.scene.rotation.set(0, 0, 0);
       char.scene.position.set(0, -0.90, 0);
