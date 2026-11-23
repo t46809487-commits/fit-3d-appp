@@ -39,8 +39,15 @@ function lerpPose(
   start: PoseDef,
   end: PoseDef,
   t: number,
-  restOf: (key: string, comp: string) => number
+  restOf: (key: string, comp: string) => number,
+  mid?: PoseDef
 ): Record<string, JointAngles> {
+  // With a middle pose: start -> mid in the first half, mid -> end in the second half
+  if (mid) {
+    return t < 0.5
+      ? lerpPose(start, mid, t * 2, restOf)
+      : lerpPose(mid, end, (t - 0.5) * 2, restOf);
+  }
   const out: Record<string, JointAngles> = {};
   const keys = new Set([...Object.keys(start), ...Object.keys(end)]);
   keys.forEach((k) => {
@@ -99,7 +106,7 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
       const val = comp === 'x' ? bone.rotation.x : comp === 'y' ? bone.rotation.y : bone.rotation.z;
       return comp === 'x' ? val : val * target[1];
     };
-    const pose = lerpPose(m.start, m.end, ph, restOf);
+    const pose = lerpPose(m.start, m.end, ph, restOf, m.mid);
     Object.keys(pose).forEach((key) => {
       const j = pose[key];
       if (key === 'hips') {
@@ -117,7 +124,9 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
         if (j.z !== undefined) bone.rotation.z = sign * j.z;
       });
     });
-    const pitch = lerp(m.pitch[0], m.pitch[1], ph);
+    const pitch = m.mid && m.midPitch !== undefined
+      ? (ph < 0.5 ? lerp(m.pitch[0], m.midPitch, ph * 2) : lerp(m.midPitch, m.pitch[1], (ph - 0.5) * 2))
+      : lerp(m.pitch[0], m.pitch[1], ph);
     scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, m.roll ?? 0, 'YXZ'));
     scene.position.set(0, 0, 0);
     scene.updateMatrixWorld(true);
@@ -143,6 +152,7 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
       restore();
       poseBody(i / (SAMPLES - 1));
       Object.keys(CONTACT_RADIUS).forEach((n) => {
+        if (m.ignoreContact && m.ignoreContact.includes(n)) return;
         const p = worldOf(n);
         if (!p) return;
         let r = CONTACT_RADIUS[n];
