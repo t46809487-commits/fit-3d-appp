@@ -95,6 +95,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     { id: 'box_jab', label: 'Boxing Jab Strike' },
     { id: 'box_cross', label: 'Boxing Cross Power' },
     { id: 'jumping_jacks', label: 'Plyometric Jacks' },
+    { id: 'mountain_climber', label: 'Mountain Climber' },
+    { id: 'burpee', label: 'Burpee' },
+    { id: 'high_knees', label: 'High Knees' },
+    { id: 'glute_bridge', label: 'Glute Bridge' },
+    { id: 'superman', label: 'Superman Hold' },
+    { id: 'tricep_dips', label: 'Bench Tricep Dips' },
   ];
 
   return (
