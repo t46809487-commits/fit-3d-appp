@@ -7,6 +7,7 @@ import {
   applyExerciseKinematics,
   updateMuscleHighlights,
 } from './characterLoader';
+import { EQUIPMENT, createEquipment, Equipment } from './equipmentProps';
 import { Bone, Play, Pause, Zap, Info, ShieldCheck, Loader2 } from 'lucide-react';
 
 interface Human3DModelProps {
@@ -50,7 +51,7 @@ const FLOOR_Y = -0.905;
 
 // Plays one full rep offline (no rendering) and returns the box that contains the whole body
 // at every moment of the exercise. Used once per exercise to frame the camera.
-function computeMotionBounds(char: LoadedCharacter, animationType: string): THREE.Box3 {
+function computeMotionBounds(char: LoadedCharacter, animationType: string, equipment?: Equipment | null): THREE.Box3 {
   const box = new THREE.Box3();
   const p = new THREE.Vector3();
   const N = 24;
@@ -62,6 +63,10 @@ function computeMotionBounds(char: LoadedCharacter, animationType: string): THRE
       b.getWorldPosition(p);
       box.expandByPoint(p);
     });
+    if (equipment) {
+      equipment.update();
+      box.union(new THREE.Box3().setFromObject(equipment.group));
+    }
   }
   applyExerciseKinematics(char, animationType, 0, 0);
   char.scene.updateMatrixWorld(true);
@@ -136,6 +141,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     char: LoadedCharacter | null;
     skeletonHelper: THREE.SkeletonHelper | null;
     box: THREE.Box3 | null;
+    equipment: Equipment | null;
     lookAt: THREE.Vector3;
     animTime: number;
     reqId: number | null;
@@ -146,6 +152,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     char: null,
     skeletonHelper: null,
     box: null,
+    equipment: null,
     lookAt: new THREE.Vector3(0, 0.05, 0),
     animTime: 0,
     reqId: null,
@@ -257,7 +264,15 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         stateRef.current.skeletonHelper = skelHelper;
 
         // Frame the whole exercise once; the camera never moves after this
-        const box = computeMotionBounds(char, animationType);
+        // Equipment (dumbbells, bench, bar, band, cable ...) for this exercise
+        const specs = EQUIPMENT[animationType];
+        let equipment: Equipment | null = null;
+        if (specs && specs.length) {
+          equipment = createEquipment(char, specs, () => applyExerciseKinematics(char, animationType, 0, 0));
+          scene.add(equipment.group);
+          stateRef.current.equipment = equipment;
+        }
+        const box = computeMotionBounds(char, animationType, equipment);
         box.expandByVector(new THREE.Vector3(0.3, 0, 0.3));      // mat margin around the body
         const mSize = box.getSize(new THREE.Vector3());
         const mCentre = box.getCenter(new THREE.Vector3());
@@ -310,6 +325,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
         // Apply joint kinematics to connected humanoid character
         applyExerciseKinematics(char, animationType, phase, t);
+        // Keep dumbbells / bar / band / cable attached to the hands and feet
+        stateRef.current.equipment?.update();
       }
 
       // Step / bench prop and camera focus for floor exercises (set by the pose engine)
@@ -336,6 +353,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     return () => {
       isDisposed = true;
       if (stateRef.current.reqId) cancelAnimationFrame(stateRef.current.reqId);
+      if (stateRef.current.equipment) {
+        stateRef.current.equipment.dispose();
+        stateRef.current.equipment = null;
+      }
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
