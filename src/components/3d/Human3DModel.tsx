@@ -7,7 +7,7 @@ import {
   applyExerciseKinematics,
   updateMuscleHighlights,
 } from './characterLoader';
-import { Bone, RotateCcw, Play, Pause, Zap, Info, ShieldCheck, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Bone, Play, Pause, Zap, Info, ShieldCheck, Loader2 } from 'lucide-react';
 
 interface Human3DModelProps {
   primaryMuscles?: MuscleName[];
@@ -20,6 +20,7 @@ interface Human3DModelProps {
   height?: number | string;
   className?: string;
   showControls?: boolean;
+  /** Kept for compatibility. The camera is now always fixed (no drag / zoom). */
   interactive?: boolean;
   onMuscleClick?: (muscle: MuscleName) => void;
   onStateChange?: (state: AnimationState) => void;
@@ -30,6 +31,9 @@ interface Human3DModelProps {
 // One rep = one full cycle. Cycle length matches the old sine wave (2*PI in animTime units).
 // phase: 0 = start posture, 1 = end posture (peak contraction).
 // ---------------------------------------------------------------------------
+// Fixed camera position (same 3/4 view for every exercise)
+const FIXED_CAM = { x: 1.15, y: 0.15, z: 2.75 };
+
 const smoothStep = (x: number) => x * x * (3 - 2 * x);
 
 const getCycleInfo = (t: number): { phase: number; state: AnimationState } => {
@@ -53,12 +57,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
   height = '100%',
   className = '',
   showControls = true,
-  interactive = true,
   onMuscleClick,
   onStateChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [activeView, setActiveView] = useState<'3q' | 'front' | 'side' | 'back'>('3q');
   const [internalPaused, setInternalPaused] = useState(isPaused);
   const [internalSpeed, setInternalSpeed] = useState(playbackSpeed);
   const [showSkeleton, setShowSkeleton] = useState(false);
@@ -85,10 +87,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     camera: THREE.PerspectiveCamera | null;
     char: LoadedCharacter | null;
     skeletonHelper: THREE.SkeletonHelper | null;
-    targetCamPos: THREE.Vector3;
-    targetLookAt: THREE.Vector3;
-    isDragging: boolean;
-    prevMousePos: { x: number; y: number };
     animTime: number;
     reqId: number | null;
   }>({
@@ -97,10 +95,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     camera: null,
     char: null,
     skeletonHelper: null,
-    targetCamPos: new THREE.Vector3(1.15, 0.15, 2.75),
-    targetLookAt: new THREE.Vector3(0, 0.05, 0),
-    isDragging: false,
-    prevMousePos: { x: 0, y: 0 },
     animTime: 0,
     reqId: null,
   });
@@ -120,7 +114,9 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
     // Perspective Camera: 38 deg FOV framing full body with safe margins
     const camera = new THREE.PerspectiveCamera(38, width / heightPx, 0.1, 100);
-    camera.position.set(1.15, 0.15, 2.75);
+    // FIXED camera: it never moves, orbits or zooms. Only the character moves.
+    camera.position.set(FIXED_CAM.x, FIXED_CAM.y, FIXED_CAM.z);
+    camera.lookAt(0, 0.05, 0);
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -185,6 +181,16 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     guideRing.position.y = -0.903;
     scene.add(guideRing);
 
+    // Step / bench prop (shown only for exercises that rest hands or feet on one)
+    const propBox = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0xaeb2b8, roughness: 0.8, metalness: 0.0 })
+    );
+    propBox.visible = false;
+    propBox.castShadow = true;
+    propBox.receiveShadow = true;
+    scene.add(propBox);
+
     stateRef.current.renderer = renderer;
     stateRef.current.scene = scene;
     stateRef.current.camera = camera;
@@ -214,44 +220,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         console.error('Character instantiation error:', err);
         setIsLoading(false);
       });
-
-    // Orbit Drag Controls
-    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
-      if (!interactive) return;
-      stateRef.current.isDragging = true;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      stateRef.current.prevMousePos = { x: clientX, y: clientY };
-    };
-
-    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      if (!interactive || !stateRef.current.isDragging || !stateRef.current.char) return;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-      const deltaX = clientX - stateRef.current.prevMousePos.x;
-      stateRef.current.char.scene.rotation.y += deltaX * 0.014;
-      stateRef.current.prevMousePos = { x: clientX, y: clientY };
-    };
-
-    const handlePointerUp = () => {
-      stateRef.current.isDragging = false;
-    };
-
-    container.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseup', handlePointerUp);
-    container.addEventListener('touchstart', handlePointerDown, { passive: true });
-    window.addEventListener('touchmove', handlePointerMove, { passive: true });
-    window.addEventListener('touchend', handlePointerUp);
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const currentDist = stateRef.current.targetCamPos.length();
-      const newDist = Math.max(1.7, Math.min(4.2, currentDist + e.deltaY * 0.0025));
-      stateRef.current.targetCamPos.setLength(newDist);
-    };
-    container.addEventListener('wheel', handleWheel, { passive: false });
 
     const handleResize = () => {
       if (!container || !renderer || !camera) return;
@@ -288,9 +256,21 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         applyExerciseKinematics(char, animationType, phase, t);
       }
 
-      // Smooth camera interpolation
-      camera.position.lerp(stateRef.current.targetCamPos, 0.09);
-      camera.lookAt(stateRef.current.targetLookAt);
+      // Step / bench prop and camera focus for floor exercises (set by the pose engine)
+      const plat = char
+        ? (char.scene.userData.platform as { x: number; z: number; height: number; yaw: number } | undefined)
+        : undefined;
+      if (plat) {
+        propBox.visible = true;
+        propBox.scale.set(0.55, plat.height, 0.42);
+        propBox.position.set(plat.x, -0.905 + plat.height / 2, plat.z);
+        propBox.rotation.y = plat.yaw;
+      } else {
+        propBox.visible = false;
+      }
+      // Camera framing is constant for a given exercise (no lerp, no drift)
+      const focusY = char ? ((char.scene.userData.focusY as number | undefined) ?? 0.05) : 0.05;
+      camera.lookAt(0, focusY, 0);
 
       renderer.render(scene, camera);
       stateRef.current.reqId = requestAnimationFrame(animate);
@@ -302,13 +282,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       isDisposed = true;
       if (stateRef.current.reqId) cancelAnimationFrame(stateRef.current.reqId);
       window.removeEventListener('resize', handleResize);
-      container.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', handlePointerUp);
-      container.removeEventListener('touchstart', handlePointerDown);
-      window.removeEventListener('touchmove', handlePointerMove);
-      window.removeEventListener('touchend', handlePointerUp);
-      container.removeEventListener('wheel', handleWheel);
       renderer.dispose();
     };
   }, [animationType, selectedGender, avatarConfig]);
@@ -328,39 +301,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     }
   }, [showSkeleton]);
 
-  // Camera presets
-  const setCameraPreset = (view: '3q' | 'front' | 'side' | 'back') => {
-    setActiveView(view);
-    const char = stateRef.current.char;
-    if (char) char.scene.rotation.set(0, 0, 0);
-
-    switch (view) {
-      case '3q':
-        stateRef.current.targetCamPos.set(1.15, 0.15, 2.75);
-        break;
-      case 'front':
-        stateRef.current.targetCamPos.set(0, 0.1, 2.85);
-        break;
-      case 'side':
-        stateRef.current.targetCamPos.set(2.85, 0.1, 0.1);
-        break;
-      case 'back':
-        stateRef.current.targetCamPos.set(0, 0.1, -2.85);
-        break;
-    }
-  };
-
-  const handleResetCamera = () => {
-    setCameraPreset('3q');
-  };
-
-  const handleZoom = (direction: 'in' | 'out') => {
-    const currentDist = stateRef.current.targetCamPos.length();
-    const factor = direction === 'in' ? 0.85 : 1.15;
-    const newDist = Math.max(1.7, Math.min(4.2, currentDist * factor));
-    stateRef.current.targetCamPos.setLength(newDist);
-  };
-
   const cycleSpeed = () => {
     const next = internalSpeed === 1 ? 0.5 : internalSpeed === 0.5 ? 0.75 : internalSpeed === 0.75 ? 1.5 : 1;
     setInternalSpeed(next);
@@ -378,7 +318,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
   return (
     <div className={`relative w-full overflow-hidden select-none rounded-3xl bg-gradient-to-b from-neutral-900 via-neutral-950 to-black ${className}`} style={{ height }}>
       {/* 3D WebGL Canvas */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div ref={containerRef} className="w-full h-full" />
 
       {/* Loading Overlay */}
       {isLoading && (
@@ -406,51 +346,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
           </span>
         </div>
       </div>
-
-      {/* Top Right: Camera Presets, Zoom & Reset Camera */}
-      {showControls && (
-        <div className="absolute top-3 right-3 flex items-center bg-black/75 backdrop-blur-md border border-neutral-800 rounded-2xl p-1 gap-1 z-10 shadow-lg">
-          {(['3q', 'front', 'side', 'back'] as const).map((view) => (
-            <button
-              key={view}
-              onClick={() => setCameraPreset(view)}
-              className={`px-2.5 py-1 text-xs font-bold rounded-xl uppercase transition-all ${
-                activeView === view
-                  ? 'bg-orange-500 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-white hover:bg-neutral-800/60'
-              }`}
-            >
-              {view === '3q' ? '3/4' : view}
-            </button>
-          ))}
-
-          <div className="h-4 w-px bg-neutral-800 mx-0.5" />
-
-          <button
-            onClick={() => handleZoom('in')}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={() => handleZoom('out')}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={handleResetCamera}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Reset Camera (Full Body 3/4 Frame)"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
 
       {/* Form Guidance Drawer */}
       {showFormCues && (
