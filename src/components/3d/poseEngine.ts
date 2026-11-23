@@ -39,15 +39,8 @@ function lerpPose(
   start: PoseDef,
   end: PoseDef,
   t: number,
-  restOf: (key: string, comp: string) => number,
-  mid?: PoseDef
+  restOf: (key: string, comp: string) => number
 ): Record<string, JointAngles> {
-  // With a middle pose: start -> mid in the first half, mid -> end in the second half
-  if (mid) {
-    return t < 0.5
-      ? lerpPose(start, mid, t * 2, restOf)
-      : lerpPose(mid, end, (t - 0.5) * 2, restOf);
-  }
   const out: Record<string, JointAngles> = {};
   const keys = new Set([...Object.keys(start), ...Object.keys(end)]);
   keys.forEach((k) => {
@@ -70,6 +63,8 @@ interface Placement {
   x: number; y: number; z: number;
   focusY: number;
   platform?: { x: number; z: number; height: number; yaw: number };
+  /** Centroid (unshifted scene space) of the planted bones at the start pose. */
+  plantRef?: THREE.Vector3;
 }
 
 // Body placement (centre, floor height, camera focus, step position) is worked out ONCE per
@@ -106,7 +101,7 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
       const val = comp === 'x' ? bone.rotation.x : comp === 'y' ? bone.rotation.y : bone.rotation.z;
       return comp === 'x' ? val : val * target[1];
     };
-    const pose = lerpPose(m.start, m.end, ph, restOf, m.mid);
+    const pose = lerpPose(m.start, m.end, ph, restOf);
     Object.keys(pose).forEach((key) => {
       const j = pose[key];
       if (key === 'hips') {
@@ -124,12 +119,17 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
         if (j.z !== undefined) bone.rotation.z = sign * j.z;
       });
     });
-    const pitch = m.mid && m.midPitch !== undefined
-      ? (ph < 0.5 ? lerp(m.pitch[0], m.midPitch, ph * 2) : lerp(m.midPitch, m.pitch[1], (ph - 0.5) * 2))
-      : lerp(m.pitch[0], m.pitch[1], ph);
+    const pitch = lerp(m.pitch[0], m.pitch[1], ph);
     scene.quaternion.setFromEuler(new THREE.Euler(pitch, m.yaw, m.roll ?? 0, 'YXZ'));
     scene.position.set(0, 0, 0);
     scene.updateMatrixWorld(true);
+  };
+
+  const plantNames = m.plant ?? [];
+  const plantCentroid = (): THREE.Vector3 | null => {
+    const pts = plantNames.map((n) => worldOf(n)).filter((p): p is THREE.Vector3 => !!p);
+    if (!pts.length) return null;
+    return pts.reduce((a, b) => a.add(b), new THREE.Vector3()).multiplyScalar(1 / pts.length);
   };
 
   let perChar = placementCache.get(char);
@@ -143,42 +143,55 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
     const restore = () => snap.forEach((s, b) => { b.rotation.copy(s.rot); b.position.copy(s.pos); });
 
     const SAMPLES = 9;
-    let minY = Infinity, sx = 0, sz = 0, sn = 0, headY = 0, hn = 0;
+    let minY = Infinity, minY0 = Infinity;
+    let sx = 0, sz = 0, sn = 0, headY = 0, hn = 0;
     let px = 0, pz = 0, pn = 0;
+    let ref: THREE.Vector3 | null = null;
     const stepNames = raise.foot ? ['LeftToeBase', 'RightToeBase'] : ['LeftHand', 'RightHand'];
     const stepHeight = raise.foot ?? raise.hand ?? 0;
 
     for (let i = 0; i < SAMPLES; i++) {
       restore();
       poseBody(i / (SAMPLES - 1));
+      const shift = new THREE.Vector3();
+      if (plantNames.length) {
+        const c = plantCentroid();
+        if (c) {
+          if (!ref) ref = c.clone();
+          shift.copy(ref).sub(c);          // keeps planted bones where they were at the start
+        }
+      }
       Object.keys(CONTACT_RADIUS).forEach((n) => {
-        if (m.ignoreContact && m.ignoreContact.includes(n)) return;
         const p = worldOf(n);
         if (!p) return;
         let r = CONTACT_RADIUS[n];
         if (n.includes('Hand')) r += raise.hand ?? 0;
         if (n.includes('Foot') || n.includes('Toe')) r += raise.foot ?? 0;
-        minY = Math.min(minY, p.y - r);
+        const y = p.y + shift.y - r;
+        minY = Math.min(minY, y);
+        if (i === 0) minY0 = Math.min(minY0, y);
       });
       ['Head', 'LeftFoot', 'RightFoot', 'LeftHand', 'RightHand'].forEach((n) => {
         const p = worldOf(n);
-        if (p) { sx += p.x; sz += p.z; sn++; }
+        if (p) { sx += p.x + shift.x; sz += p.z + shift.z; sn++; }
       });
       const h = worldOf('Head');
-      if (h) { headY += h.y; hn++; }
+      if (h) { headY += h.y + shift.y; hn++; }
       if (stepHeight > 0) {
         stepNames.forEach((n) => {
           const p = worldOf(n);
-          if (p) { px += p.x; pz += p.z; pn++; }
+          if (p) { px += p.x + shift.x; pz += p.z + shift.z; pn++; }
         });
       }
     }
     restore();
 
     if (!isFinite(minY)) minY = 0;
+    if (!isFinite(minY0)) minY0 = 0;
     const cx = sn > 0 ? sx / sn : 0;
     const cz = sn > 0 ? sz / sn : 0;
-    const offY = FLOOR_Y - minY;
+    let offY = FLOOR_Y - (ref ? minY0 : minY);
+    if (ref && m.anchorY !== undefined) offY = m.anchorY - ref.y;
     const headWorldY = hn > 0 ? headY / hn + offY : null;
     placement = {
       x: -cx, y: offY, z: -cz,
@@ -186,13 +199,19 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
       platform: stepHeight > 0 && pn > 0
         ? { x: px / pn - cx, z: pz / pn - cz, height: stepHeight, yaw: m.yaw }
         : undefined,
+      plantRef: ref ?? undefined,
     };
     perChar.set(m, placement);
   }
 
-  // Final pose for this frame, with the fixed placement
+  // Final pose for this frame, with the fixed placement (+ planted bones held in place)
   poseBody(phase);
-  scene.position.set(placement.x, placement.y, placement.z);
+  const sh = new THREE.Vector3();
+  if (placement.plantRef) {
+    const c = plantCentroid();
+    if (c) sh.copy(placement.plantRef).sub(c);
+  }
+  scene.position.set(placement.x + sh.x, placement.y + sh.y, placement.z + sh.z);
   scene.updateMatrixWorld(true);
   scene.userData.focusY = placement.focusY;
   scene.userData.platform = placement.platform;
