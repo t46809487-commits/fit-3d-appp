@@ -142,3 +142,73 @@ export function generateWorkoutPlan(
     exercises: selectedExercises
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// Body-part workouts for the Workout tab: one workout per muscle group that
+// contains EVERY exercise of that group, done as 2 rounds (the same exercises
+// repeat once). New exercises added to a group appear here automatically.
+// ---------------------------------------------------------------------------
+const CARDIO_IDS = ['EX017', 'EX018', 'EX019', 'EX060', 'EX064', 'EX065', 'EX084', 'EX085', 'EX086', 'EX087'];
+
+interface CategoryDef {
+  id: string;
+  title: string;
+  emoji: string;
+  goal: FitnessGoal;
+  gradient: string;
+  filter: (e: Exercise) => boolean;
+}
+
+const hasMuscle = (e: Exercise, name: string) => e.primaryMuscles.some(m => m.startsWith(name));
+
+export const CATEGORY_DEFS: CategoryDef[] = [
+  { id: 'chest', title: 'Chest', emoji: '💪', goal: 'Chest', gradient: 'from-rose-500/20 via-red-600/30 to-orange-600/20', filter: e => e.category === 'Chest' },
+  { id: 'back', title: 'Back', emoji: '🦍', goal: 'Back', gradient: 'from-sky-500/20 via-blue-600/30 to-indigo-600/20', filter: e => e.category === 'Back' },
+  { id: 'biceps', title: 'Biceps', emoji: '💪', goal: 'Arms', gradient: 'from-orange-500/20 via-amber-600/30 to-yellow-600/20', filter: e => e.category === 'Arms' && hasMuscle(e, 'biceps') },
+  { id: 'triceps', title: 'Triceps', emoji: '🔥', goal: 'Arms', gradient: 'from-red-500/20 via-orange-600/30 to-amber-600/20', filter: e => e.category === 'Arms' && hasMuscle(e, 'triceps') },
+  { id: 'abs', title: 'Abs', emoji: '🎯', goal: 'Build Abs', gradient: 'from-lime-500/20 via-green-600/30 to-emerald-600/20', filter: e => e.category === 'Abs' },
+  { id: 'cardio', title: 'Cardio', emoji: '🏃', goal: 'Fat Loss', gradient: 'from-pink-500/20 via-rose-600/30 to-red-600/20', filter: e => CARDIO_IDS.includes(e.id) },
+  { id: 'legs', title: 'Legs', emoji: '🦵', goal: 'Legs', gradient: 'from-violet-500/20 via-purple-600/30 to-fuchsia-600/20', filter: e => e.category === 'Legs' },
+  { id: 'shoulders', title: 'Shoulders', emoji: '🏋️', goal: 'Shoulders', gradient: 'from-cyan-500/20 via-teal-600/30 to-emerald-600/20', filter: e => e.category === 'Shoulders' },
+  { id: 'mobility', title: 'Mobility', emoji: '🧘', goal: 'Mobility', gradient: 'from-teal-500/20 via-emerald-600/30 to-green-600/20', filter: e => e.category === 'Mobility' },
+];
+
+const DIFFICULTY_RANK: Record<string, number> = { Beginner: 0, Intermediate: 1, Advanced: 2 };
+const LEVELS: FitnessLevel[] = ['Beginner', 'Intermediate', 'Advanced'];
+
+function buildCategoryWorkout(def: CategoryDef, rounds = 2): WorkoutRoutine {
+  const base = EXERCISES_DATABASE.filter(def.filter);
+  // Each exercise is done once per round; the whole list then repeats.
+  const oneRound: Exercise[] = base.map(e => ({ ...e, sets: 1 }));
+  const exercises: Exercise[] = [];
+  for (let r = 0; r < rounds; r++) oneRound.forEach(e => exercises.push({ ...e }));
+
+  const seconds = exercises.reduce(
+    (acc, e) => acc + (e.durationSeconds || Math.max(30, e.reps * 3)) + (e.restSeconds || 30),
+    0
+  );
+  const calories = exercises.reduce((acc, e) => acc + e.caloriesEstimate, 0);
+  const sorted = [...base].sort((a, b) => (DIFFICULTY_RANK[a.difficulty] ?? 0) - (DIFFICULTY_RANK[b.difficulty] ?? 0));
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : undefined;
+  const level = LEVELS[median ? (DIFFICULTY_RANK[median.difficulty] ?? 0) : 0];
+
+  return {
+    id: `CAT_${def.id.toUpperCase()}`,
+    title: `${def.title} Workout`,
+    subtitle: `${base.length} exercises × ${rounds} rounds = ${exercises.length} moves`,
+    durationMinutes: Math.max(1, Math.round(seconds / 60)),
+    level,
+    goal: def.goal,
+    category: def.title,
+    caloriesEstimate: calories,
+    bannerGradient: def.gradient,
+    exercises,
+  };
+}
+
+export const CATEGORY_WORKOUTS: Array<WorkoutRoutine & { emoji: string; uniqueNames: string[] }> = CATEGORY_DEFS.map(def => {
+  const routine = buildCategoryWorkout(def);
+  const uniqueNames = EXERCISES_DATABASE.filter(def.filter).map(e => e.name);
+  return { ...routine, emoji: def.emoji, uniqueNames };
+});
