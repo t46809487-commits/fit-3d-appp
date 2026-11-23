@@ -46,6 +46,54 @@ const getCycleInfo = (t: number): { phase: number; state: AnimationState } => {
   return { phase: 0, state: 'REP_COMPLETE' };
 };
 
+const FLOOR_Y = -0.905;
+
+// Plays one full rep offline (no rendering) and returns the box that contains the whole body
+// at every moment of the exercise. Used once per exercise to frame the camera.
+function computeMotionBounds(char: LoadedCharacter, animationType: string): THREE.Box3 {
+  const box = new THREE.Box3();
+  const p = new THREE.Vector3();
+  const N = 24;
+  for (let i = 0; i < N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    applyExerciseKinematics(char, animationType, getCycleInfo(t).phase, t);
+    char.scene.updateMatrixWorld(true);
+    Object.values(char.bones).forEach((b) => {
+      b.getWorldPosition(p);
+      box.expandByPoint(p);
+    });
+  }
+  applyExerciseKinematics(char, animationType, 0, 0);
+  char.scene.updateMatrixWorld(true);
+  box.expandByScalar(0.14);                          // body thickness / head / hands
+  box.expandByPoint(new THREE.Vector3(0, FLOOR_Y, 0)); // keep the floor in view
+  return box;
+}
+
+// Places the (fixed) camera so the whole motion box fits in view. Same viewing direction for
+// every exercise; only the distance and the look-at point depend on the exercise.
+function fitCameraToBox(camera: THREE.PerspectiveCamera, box: THREE.Box3): THREE.Vector3 {
+  const center = box.getCenter(new THREE.Vector3());
+  const dir = new THREE.Vector3(FIXED_CAM.x, FIXED_CAM.y, FIXED_CAM.z).normalize();
+  const corners: THREE.Vector3[] = [];
+  for (const x of [box.min.x, box.max.x])
+    for (const y of [box.min.y, box.max.y])
+      for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  let d = 1.2;
+  for (let i = 0; i < 120; i++) {
+    camera.position.copy(center).addScaledVector(dir, d);
+    camera.lookAt(center);
+    camera.updateMatrixWorld(true);
+    const fits = corners.every((c) => {
+      const n = c.clone().project(camera);
+      return Math.abs(n.x) <= 0.92 && Math.abs(n.y) <= 0.92;
+    });
+    if (fits) break;
+    d *= 1.04;
+  }
+  return center;
+}
+
 export const Human3DModel: React.FC<Human3DModelProps> = ({
   primaryMuscles = [],
   secondaryMuscles = [],
@@ -87,6 +135,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     camera: THREE.PerspectiveCamera | null;
     char: LoadedCharacter | null;
     skeletonHelper: THREE.SkeletonHelper | null;
+    box: THREE.Box3 | null;
+    lookAt: THREE.Vector3;
     animTime: number;
     reqId: number | null;
   }>({
@@ -95,6 +145,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     camera: null,
     char: null,
     skeletonHelper: null,
+    box: null,
+    lookAt: new THREE.Vector3(0, 0.05, 0),
     animTime: 0,
     reqId: null,
   });
@@ -110,7 +162,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
     // Light neutral studio background (PRD visual language)
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xe9ebee);
+    scene.background = new THREE.Color(0xf4f5f7);   // clean off-white, like workout apps
 
     // Perspective Camera: 38 deg FOV framing full body with safe margins
     const camera = new THREE.PerspectiveCamera(38, width / heightPx, 0.1, 100);
@@ -164,22 +216,14 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     shadowFloor.receiveShadow = true;
     scene.add(shadowFloor);
 
-    // Light podium with orange accent ring (PRD: one strong accent color)
-    const platform = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.2, 1.3, 0.08, 40),
-      new THREE.MeshStandardMaterial({ color: 0xd3d6da, roughness: 0.8, metalness: 0.0 })
+    // Exercise mat (light blue). Its size is set once per exercise from the body footprint.
+    const exMat = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 0.03, 1),
+      new THREE.MeshStandardMaterial({ color: 0x8fd3f4, roughness: 0.9, metalness: 0.0 })
     );
-    platform.position.y = -0.945;
-    platform.receiveShadow = true;
-    scene.add(platform);
-
-    const guideRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.16, 1.20, 48),
-      new THREE.MeshBasicMaterial({ color: 0xf97316, side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
-    );
-    guideRing.rotation.x = Math.PI / 2;
-    guideRing.position.y = -0.903;
-    scene.add(guideRing);
+    exMat.visible = false;
+    exMat.receiveShadow = true;
+    scene.add(exMat);
 
     // Step / bench prop (shown only for exercises that rest hands or feet on one)
     const propBox = new THREE.Mesh(
@@ -212,6 +256,17 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         stateRef.current.char = char;
         stateRef.current.skeletonHelper = skelHelper;
 
+        // Frame the whole exercise once; the camera never moves after this
+        const box = computeMotionBounds(char, animationType);
+        box.expandByVector(new THREE.Vector3(0.3, 0, 0.3));      // mat margin around the body
+        const mSize = box.getSize(new THREE.Vector3());
+        const mCentre = box.getCenter(new THREE.Vector3());
+        exMat.scale.set(Math.max(mSize.x, 1.0), 1, Math.max(mSize.z, 1.0));
+        exMat.position.set(mCentre.x, FLOOR_Y - 0.011, mCentre.z);
+        exMat.visible = true;
+        stateRef.current.box = box;
+        stateRef.current.lookAt = fitCameraToBox(camera, box);
+
         // Apply initial muscle highlights
         updateMuscleHighlights(char, primaryMuscles, secondaryMuscles);
         setIsLoading(false);
@@ -228,6 +283,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      if (stateRef.current.box) stateRef.current.lookAt = fitCameraToBox(camera, stateRef.current.box);
     };
     window.addEventListener('resize', handleResize);
 
@@ -268,9 +324,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       } else {
         propBox.visible = false;
       }
-      // Camera framing is constant for a given exercise (no lerp, no drift)
-      const focusY = char ? ((char.scene.userData.focusY as number | undefined) ?? 0.05) : 0.05;
-      camera.lookAt(0, focusY, 0);
+      // Camera is fixed for the whole exercise (position set once in fitCameraToBox)
+      camera.lookAt(stateRef.current.lookAt);
 
       renderer.render(scene, camera);
       stateRef.current.reqId = requestAnimationFrame(animate);
