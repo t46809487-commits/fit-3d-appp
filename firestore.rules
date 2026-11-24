@@ -11,8 +11,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // A real account (Google, Facebook or phone OTP). Guests sign in anonymously
+    // and must never read or write personal data.
+    function isRealUser() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isRealUser() && request.auth.uid == userId;
     }
 
     function isValidId(id) {
@@ -20,64 +26,10 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'kmrsahil9193@gmail.com' ||
+      return isRealUser() && (
+        (request.auth.token.email == 'kmrsahil9193@gmail.com' && request.auth.token.email_verified == true) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
-    }
-
-
-    // ---------------------------------------------------------------
-    // COMMUNITY (paid feature): only Pro / Elite members (or admins)
-    // can read or write posts, comments, profiles and follows.
-    // NOTE: the tier is read from users/{uid}.subscription, which is
-    // written by the app. Until payments are verified on a server
-    // (Razorpay webhook / Cloud Function) this can be edited by the user.
-    // ---------------------------------------------------------------
-    function isPaid() {
-      return isSignedIn() && (
-        isAdmin() || (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('subscription', {}).get('tier', 'free') in ['pro', 'elite'] &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('subscription', {}).get('status', 'expired') in ['active', 'trialing']
-        )
-      );
-    }
-
-    function validPost(d) {
-      return d.keys().hasAll(['authorId', 'authorName', 'authorLevel', 'authorTier', 'text', 'likedBy', 'createdAt'])
-        && d.keys().hasOnly(['authorId', 'authorName', 'authorPhoto', 'authorLevel', 'authorTier', 'text', 'imageData', 'stats', 'likedBy', 'createdAt'])
-        && d.authorId == request.auth.uid
-        && d.authorName is string && d.authorName.size() <= 60
-        && d.authorLevel is number
-        && d.authorTier in ['pro', 'elite']
-        && d.text is string && d.text.size() <= 500
-        && (d.text.size() > 0 || ('imageData' in d))
-        && (!('imageData' in d) || (d.imageData is string && d.imageData.size() <= 250000))
-        && (!('stats' in d) || d.stats is map)
-        && d.likedBy is list && d.likedBy.size() == 0
-        && d.createdAt is number;
-    }
-
-    // Anyone paid may only add or remove THEIR OWN uid in likedBy.
-    function onlyOwnLikeChange() {
-      let before = resource.data.likedBy;
-      let after = request.resource.data.likedBy;
-      let uid = request.auth.uid;
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy'])
-        && (
-          (after.size() == before.size() + 1 && after.hasAll(before) && (uid in after) && !(uid in before))
-          || (before.size() == after.size() + 1 && before.hasAll(after) && (uid in before) && !(uid in after))
-        );
-    }
-
-    function validProfile(d, uid) {
-      return d.keys().hasAll(['userId', 'displayName', 'level', 'xp', 'streak', 'totalWorkouts', 'tier', 'joinedAt', 'lastActiveAt'])
-        && d.keys().hasOnly(['userId', 'displayName', 'photoURL', 'level', 'xp', 'streak', 'totalWorkouts', 'totalCalories', 'tier', 'joinedAt', 'lastActiveAt'])
-        && d.userId == uid
-        && d.displayName is string && d.displayName.size() <= 60
-        && d.tier in ['pro', 'elite']
-        && d.lastActiveAt is number && d.joinedAt is number;
     }
 
     // Connection test document
@@ -85,12 +37,16 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // User profiles
+    // User profiles (private: only the owner or an admin)
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isOwner(userId) && isValidId(userId);
-      allow update: if (isOwner(userId) || isAdmin());
+      allow list: if isRealUser() && resource.data.userId == request.auth.uid;
+      allow create: if isOwner(userId) && isValidId(userId)
+        && request.resource.data.userId == userId
+        && request.resource.data.keys().size() <= 60;
+      allow update: if (isOwner(userId) || isAdmin())
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.keys().size() <= 60;
       allow delete: if isOwner(userId) || isAdmin();
 
       // Subcollections
@@ -137,61 +93,16 @@ service cloud.firestore {
       }
     }
 
-    // Exercises Catalog
+    // Exercises Catalog (guests may read it for the Explore tab; only admins publish)
     match /exercises/{exerciseId} {
-      allow read: if true;
-      allow create: if isSignedIn() && isValidId(exerciseId);
-      allow update: if isSignedIn() && (isAdmin() || resource.data.createdBy == request.auth.uid);
-      allow delete: if isSignedIn() && (isAdmin() || resource.data.createdBy == request.auth.uid);
-    }
-
-
-    // Community: posts (+ comments)
-    match /posts/{postId} {
-      allow read: if isPaid();
-      allow create: if isPaid() && validPost(request.resource.data);
-      allow update: if isPaid() && onlyOwnLikeChange();
-      allow delete: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin());
-
-      match /comments/{commentId} {
-        allow read: if isPaid();
-        allow create: if isPaid()
-          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'authorPhoto', 'text', 'createdAt'])
-          && request.resource.data.authorId == request.auth.uid
-          && request.resource.data.text is string
-          && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 300
-          && request.resource.data.createdAt is number;
-        allow delete: if isSignedIn() && (
-          resource.data.authorId == request.auth.uid
-          || get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid
-          || isAdmin()
-        );
-      }
-    }
-
-    // Community: public member profiles (no email, no private data)
-    match /profiles/{uid} {
-      allow read: if isPaid();
-      allow create, update: if isPaid() && isOwner(uid) && validProfile(request.resource.data, uid);
-      allow delete: if isOwner(uid) || isAdmin();
-    }
-
-    // Community: follow links, document id = followerId_followingId
-    match /follows/{followId} {
-      allow read: if isPaid();
-      allow create: if isPaid()
-        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
-        && request.resource.data.followerId == request.auth.uid
-        && request.resource.data.followingId is string
-        && request.resource.data.followingId != request.auth.uid
-        && followId == request.auth.uid + '_' + request.resource.data.followingId;
-      allow delete: if isSignedIn() && resource.data.followerId == request.auth.uid;
+      allow read: if isSignedIn();
+      allow create: if isAdmin() && isValidId(exerciseId);
+      allow update, delete: if isAdmin() || (isRealUser() && resource.data.createdBy == request.auth.uid);
     }
 
     // Admins registry
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin();
       allow write: if isAdmin();
     }
   }
