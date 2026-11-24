@@ -403,3 +403,9 @@ export const BoxingArena: React.FC<BoxingArenaProps> = ({
     </div>
   );
 };
+<BoxingArena
+  characterId={userProfile.preferredCharacter}
+  avatarConfig={userProfile.avatarConfig}
+  onClose={() => setIsBoxingOpen(false)}
+  onFinishBoxingSession={handleFinishBoxingSession}
+/>
