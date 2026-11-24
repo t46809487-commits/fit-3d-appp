@@ -75,7 +75,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </span>
             </div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              {currentUser?.email || 'Local Athlete • Sync with Google'}
+              {currentUser?.email || (currentUser?.phoneNumber ? currentUser.phoneNumber.replace(/\d(?=\d{4})/g, '•') : 'Local Athlete • Sync with Google')}
             </p>
           </div>
         </div>
