@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, Compass, Dumbbell, User, Utensils, Flame } from 'lucide-react';
+import { Home, Compass, Dumbbell, User, Utensils, Users } from 'lucide-react';
 
-export type TabType = 'home' | 'explore' | 'workout' | 'diet' | 'profile';
+export type TabType = 'home' | 'explore' | 'workout' | 'diet' | 'community' | 'profile';
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -19,12 +19,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     { id: 'explore' as TabType, label: 'Explore', icon: Compass },
     { id: 'workout' as TabType, label: 'Workout', icon: Dumbbell },
     { id: 'diet' as TabType, label: 'Diet', icon: Utensils },
+    { id: 'community' as TabType, label: 'Social', icon: Users },
     { id: 'profile' as TabType, label: 'Me', icon: User },
   ];
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 bg-neutral-950/90 backdrop-blur-xl border-t border-neutral-900 pb-safe">
-      <div className="max-w-md mx-auto px-4 py-2 flex items-center justify-around relative">
+      <div className="max-w-md mx-auto px-2 py-2 flex items-center justify-around relative">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -33,7 +34,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               key={tab.id}
               onClick={() => onChangeTab(tab.id)}
-              className={`flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition-all ${
+              className={`flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl transition-all ${
                 isActive
                   ? 'text-orange-500 scale-105 font-bold'
                   : 'text-neutral-400 hover:text-neutral-200'
@@ -45,7 +46,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                   <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)]" />
                 )}
               </div>
-              <span className="text-[11px] mt-1 tracking-tight">{tab.label}</span>
+              <span className="text-[10px] mt-1 tracking-tight">{tab.label}</span>
             </button>
           );
         })}
@@ -53,7 +54,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Quick Boxing Mode Action Shortcut */}
         <button
           onClick={onOpenBoxing}
-          className="flex flex-col items-center justify-center py-1.5 px-2.5 rounded-2xl text-red-400 hover:text-red-300 transition-all hover:scale-105 group"
+          className="flex flex-col items-center justify-center py-1.5 px-1.5 rounded-2xl text-red-400 hover:text-red-300 transition-all hover:scale-105 group"
           title="Open 3D Boxing Mode"
         >
           <div className="relative">
