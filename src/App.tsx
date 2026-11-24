@@ -9,7 +9,8 @@ import {
   db, 
   testFirestoreConnection, 
   handleFirestoreError, 
-  OperationType 
+  OperationType,
+  logoutUser,
 } from './firebase';
 import { onAuthStateChanged, User as FbUser } from 'firebase/auth';
 import { 
@@ -33,6 +34,8 @@ import {
 } from './types';
 import { EXERCISES_DATABASE } from './data/exercises';
 import { PRESET_WORKOUTS, CATEGORY_WORKOUTS, generateWorkoutPlan } from './data/workouts';
+import { LoginScreen } from './components/auth/LoginScreen';
+import { LockedScreen, LoginRequiredModal } from './components/auth/AccessGate';
 import { getDefaultAvatarConfig } from './data/subscriptions';
 
 import { BottomNav, TabType } from './components/navigation/BottomNav';
@@ -43,7 +46,6 @@ import { DietScreen } from './components/diet/DietScreen';
 import { ExerciseDetailModal } from './components/exercise/ExerciseDetailModal';
 import { WorkoutPlayer } from './components/workout/WorkoutPlayer';
 import { BoxingArena } from './components/boxing/BoxingArena';
-import { CommunityScreen } from './components/community/CommunityScreen';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { AvatarCustomizerModal } from './components/profile/AvatarCustomizerModal';
@@ -97,6 +99,10 @@ const DEFAULT_PROFILE: UserProfile = {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<FbUser | null>(null);
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const [loginPromptOpen, setLoginPromptOpen] = useState<boolean>(false);
+  // Guest = anonymous account: may only browse the Explore tab
+  const isGuest = currentUser?.isAnonymous === true;
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [exercisesList, setExercisesList] = useState<Exercise[]>(EXERCISES_DATABASE);
@@ -143,6 +149,25 @@ export default function App() {
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      setAuthReady(true);
+
+      if (!user) {
+        // Logged out: clear everything that belonged to the previous person
+        setUserProfile(DEFAULT_PROFILE);
+        setFavorites(['EX001', 'EX007', 'BX001']);
+        setWorkoutLogs([]);
+        setActiveTab('home');
+        setActiveWorkout(null);
+        setIsBoxingOpen(false);
+        setSelectedExercise(null);
+        return;
+      }
+
+      if (user.isAnonymous) {
+        // Guests never read or write personal data
+        setActiveTab('explore');
+        return;
+      }
 
       if (user) {
         // User logged in -> Sync with Firestore
@@ -207,6 +232,7 @@ export default function App() {
 
   // Listen to Firestore global exercises collection for admin-published exercises
   useEffect(() => {
+    if (!currentUser) return;
     try {
       const exRef = collection(db, 'exercises');
       const unsubEx = onSnapshot(exRef, (snapshot) => {
@@ -229,15 +255,16 @@ export default function App() {
     } catch (e) {
       console.warn(e);
     }
-  }, []);
+  }, [currentUser?.uid]);
 
   // Check if onboarding is needed
   useEffect(() => {
+    if (!currentUser || currentUser.isAnonymous) return;
     const hasSeenOnboarding = localStorage.getItem('fit3d_onboarded');
     if (!hasSeenOnboarding && !userProfile.onboarded) {
       setIsOnboardingOpen(true);
     }
-  }, [userProfile.onboarded]);
+  }, [userProfile.onboarded, currentUser?.uid]);
 
   // Dynamic Today's Workout derived from user's current goal & level
   const todayWorkout: WorkoutRoutine = React.useMemo(() => {
@@ -292,6 +319,10 @@ export default function App() {
   };
 
   const handleToggleFavorite = async (exerciseId: string) => {
+    if (isGuest) {
+      setLoginPromptOpen(true);
+      return;
+    }
     let next: string[];
     const isFav = favorites.includes(exerciseId);
 
@@ -486,6 +517,39 @@ export default function App() {
     }
   };
 
+  // ---- Access control -------------------------------------------------
+  // Guests can only browse Explore. Starting any workout / exercise needs a real login.
+  const guestBlocked = isGuest && activeTab !== 'explore';
+  const startWorkout = (routine: WorkoutRoutine) => {
+    if (isGuest) {
+      setLoginPromptOpen(true);
+      return;
+    }
+    setActiveWorkout(routine);
+  };
+  const openBoxing = () => {
+    if (isGuest) {
+      setLoginPromptOpen(true);
+      return;
+    }
+    setIsBoxingOpen(true);
+  };
+  const goToLogin = async () => {
+    setLoginPromptOpen(false);
+    await logoutUser(); // ends the guest session -> login screen appears
+  };
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-400 text-sm">
+        Loading...
+      </div>
+    );
+  }
+  if (!currentUser) {
+    return <LoginScreen />;
+  }
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans">
       
@@ -506,14 +570,14 @@ export default function App() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setIsBoxingOpen(true)}
+              onClick={openBoxing}
               className="px-3 py-1.5 rounded-xl bg-red-950/70 border border-red-500/40 text-red-300 hover:text-white text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-red-900/20"
             >
               <span>🥊 Boxing</span>
             </button>
 
             <button
-              onClick={() => setIsOnboardingOpen(true)}
+              onClick={() => (isGuest ? setLoginPromptOpen(true) : setIsOnboardingOpen(true))}
               className="px-2.5 py-1.5 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white text-xs font-semibold transition"
               title="Personalize Goals"
             >
@@ -525,19 +589,19 @@ export default function App() {
 
       {/* Main View Area */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-4 sm:py-6">
-        {activeTab === 'home' && (
+        {!guestBlocked && activeTab === 'home' && (
           <HomeScreen
             userProfile={userProfile}
             todayWorkout={todayWorkout}
             recommendedExercises={recommendedExercises}
-            onStartWorkout={(routine) => setActiveWorkout(routine)}
+            onStartWorkout={startWorkout}
             onSelectExercise={(ex) => setSelectedExercise(ex)}
             onFilterByBodyPart={(part) => {
               setExploreInitialCategory(part);
               setActiveTab('explore');
             }}
             onChangeGoal={(goal) => handleUpdateProfile({ goal })}
-            onOpenBoxing={() => setIsBoxingOpen(true)}
+            onOpenBoxing={openBoxing}
           />
         )}
 
@@ -551,7 +615,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'workout' && (
+        {!guestBlocked && activeTab === 'workout' && (
           <div className="space-y-8 pb-28 animate-fade-in">
             <div className="space-y-1 pt-2">
               <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -598,7 +662,7 @@ export default function App() {
                       </details>
 
                       <button
-                        onClick={() => setActiveWorkout(routine)}
+                        onClick={() => startWorkout(routine)}
                         className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-orange-500 hover:text-white text-neutral-200 text-xs font-black uppercase tracking-wider transition active:scale-95"
                       >
                         Start {routine.title}
@@ -635,7 +699,7 @@ export default function App() {
                     </div>
 
                     <button
-                      onClick={() => setActiveWorkout(routine)}
+                      onClick={() => startWorkout(routine)}
                       className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-orange-500 hover:text-white text-neutral-200 text-xs font-black uppercase tracking-wider transition active:scale-95"
                     >
                       Start Routine
@@ -647,7 +711,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'diet' && (
+        {!guestBlocked && activeTab === 'diet' && (
           <DietScreen
             userProfile={userProfile}
             onUpdatePreferences={(prefs) =>
@@ -662,16 +726,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'community' && (
-          <CommunityScreen
-            userProfile={userProfile}
-            currentUser={currentUser}
-            workoutLogs={workoutLogs}
-            onOpenUpgrade={() => setIsSubscriptionOpen(true)}
-          />
-        )}
-
-        {activeTab === 'profile' && (
+        {!guestBlocked && activeTab === 'profile' && (
           <ProfileScreen
             userProfile={userProfile}
             workoutLogs={workoutLogs}
@@ -683,6 +738,7 @@ export default function App() {
             onOpenSubscriptions={() => setIsSubscriptionOpen(true)}
           />
         )}
+        {guestBlocked && <LockedScreen onLogin={goToLogin} />}
       </main>
 
       {/* Bottom Sticky Navigation */}
@@ -692,11 +748,11 @@ export default function App() {
           setActiveTab(tab);
           setExploreInitialCategory('All');
         }}
-        onOpenBoxing={() => setIsBoxingOpen(true)}
+        onOpenBoxing={openBoxing}
       />
 
       {/* Active Workout Player Mode (PRD Section 19 & 20) */}
-      {activeWorkout && (
+      {activeWorkout && !isGuest && (
         <WorkoutPlayer
           routine={activeWorkout}
           characterId={userProfile.preferredCharacter}
@@ -707,10 +763,8 @@ export default function App() {
       )}
 
       {/* Hero 3D Boxing Combat Arena (PRD Section 18 & 25) */}
-      {isBoxingOpen && (
+      {isBoxingOpen && !isGuest && (
         <BoxingArena
-          characterId={userProfile.preferredCharacter}
-          avatarConfig={userProfile.avatarConfig}
           onClose={() => setIsBoxingOpen(false)}
           onFinishBoxingSession={handleFinishBoxingSession}
         />
@@ -726,6 +780,10 @@ export default function App() {
         isFavorite={selectedExercise ? favorites.includes(selectedExercise.id) : false}
         onToggleFavorite={handleToggleFavorite}
         onStartExercise={(ex) => {
+          if (isGuest) {
+            setLoginPromptOpen(true);
+            return;
+          }
           // Launch quick single exercise session
           setActiveWorkout({
             id: `quick-${ex.id}`,
@@ -775,6 +833,13 @@ export default function App() {
         onClose={() => setIsSubscriptionOpen(false)}
         userProfile={userProfile}
         onSelectPlan={handleSelectSubscriptionPlan}
+      />
+
+      {/* Login required pop-up for guests */}
+      <LoginRequiredModal
+        open={loginPromptOpen}
+        onClose={() => setLoginPromptOpen(false)}
+        onLogin={goToLogin}
       />
     </div>
   );
