@@ -43,6 +43,7 @@ import { DietScreen } from './components/diet/DietScreen';
 import { ExerciseDetailModal } from './components/exercise/ExerciseDetailModal';
 import { WorkoutPlayer } from './components/workout/WorkoutPlayer';
 import { BoxingArena } from './components/boxing/BoxingArena';
+import { CommunityScreen } from './components/community/CommunityScreen';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { AvatarCustomizerModal } from './components/profile/AvatarCustomizerModal';
@@ -658,6 +659,15 @@ export default function App() {
               })
             }
             onOpenUpgradeModal={() => setIsSubscriptionOpen(true)}
+          />
+        )}
+
+        {activeTab === 'community' && (
+          <CommunityScreen
+            userProfile={userProfile}
+            currentUser={currentUser}
+            workoutLogs={workoutLogs}
+            onOpenUpgrade={() => setIsSubscriptionOpen(true)}
           />
         )}
 
