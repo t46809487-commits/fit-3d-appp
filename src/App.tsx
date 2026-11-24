@@ -699,6 +699,8 @@ export default function App() {
       {/* Hero 3D Boxing Combat Arena (PRD Section 18 & 25) */}
       {isBoxingOpen && (
         <BoxingArena
+          characterId={userProfile.preferredCharacter}
+          avatarConfig={userProfile.avatarConfig}
           onClose={() => setIsBoxingOpen(false)}
           onFinishBoxingSession={handleFinishBoxingSession}
         />
