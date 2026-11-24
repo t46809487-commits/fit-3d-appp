@@ -35,6 +35,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionConfig[] = [
       'Smart meal substitutions & 1-click weekly grocery lists',
       'Unlimited AI Diet Chat with nutrition safety checks',
       'Deep progress analytics & measurement history tracking',
+      'FIT3D Community: share your fitness journey with posts, photos & stats, follow other members',
       'Ad-free uninterrupted workout player'
     ]
   },
