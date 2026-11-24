@@ -1,78 +1,100 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { sounds } from '../../utils/audio';
+import { CharacterModelId, AvatarConfiguration } from '../../types';
 import {
   LoadedCharacter,
   createCharacterInstance,
   applyExerciseKinematics,
 } from './characterLoader';
-import { RotateCcw, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
+import { createPunchingBag, PunchingBag } from './punchingBag';
+import { PUNCHES } from '../../data/boxingWorkout';
+import { Loader2 } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Auto-performing 3D boxer (same idea as Human3DModel for the other exercises):
+//   - you give it a sequence of punches, e.g. [1, 2, 3]
+//   - the boxer throws them BY ITSELF in that order (1st, 2nd, 3rd), goes back to
+//     guard, and repeats until the drill changes
+//   - if useBag is true a heavy bag hangs in front and swings when it is hit
+// The camera is fixed (no drag / zoom), like in all the other exercises.
+// ---------------------------------------------------------------------------
 
 interface Boxing3DModelProps {
-  currentPunch?: number; // 1 to 6
-  comboSequence?: number[];
-  onPunchComplete?: (punchNumber: number) => void;
+  /** Punch numbers in order. Empty array = guard stance only. */
+  sequence: number[];
+  useBag: boolean;
+  isPaused?: boolean;
+  speed?: number;
+  characterId?: CharacterModelId;
+  avatarConfig?: AvatarConfiguration;
   height?: number | string;
   className?: string;
+  onReady?: () => void;
+  /** Fired when a punch starts. index = position inside the sequence (0 = 1st punch), -1 = back in guard. */
+  onPunchStart?: (index: number, punchNumber: number) => void;
+  /** Fired every time the whole sequence has been thrown once. */
+  onSequenceComplete?: () => void;
 }
 
+const FLOOR_Y = -0.905;
+const PUNCH_TIME = 0.8;   // seconds for one punch (out and back)
+const PEAK_AT = 0.4;      // fraction of the punch where the fist lands
+const START_DELAY = 0.6;  // guard time before the first punch of a drill
+const BAG_H = 0.95;
+const BAG_R = 0.17;
+const BAG_CHAIN = 0.45;
+const GLOVE_REACH = 0.08; // how far the glove sticks out past the wrist
+const UP = new THREE.Vector3(0, 1, 0);
+
+const smoothStep = (x: number) => x * x * (3 - 2 * x);
+// 0 -> 1 fast (punch out), then 1 -> 0 smooth (retract)
+const punchShape = (p: number) =>
+  p < PEAK_AT
+    ? 1 - Math.pow(1 - p / PEAK_AT, 2)
+    : 1 - smoothStep((p - PEAK_AT) / (1 - PEAK_AT));
+
+interface Reach { fwd: number; y: number }
+
 export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
-  currentPunch = 0,
-  comboSequence = [],
-  onPunchComplete,
+  sequence,
+  useBag,
+  isPaused = false,
+  speed = 1,
+  characterId = 'CHAR-M-01',
+  avatarConfig,
   height = '100%',
   className = '',
+  onReady,
+  onPunchStart,
+  onSequenceComplete,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [lastPunchName, setLastPunchName] = useState<string>('Orthodox Guard');
-  const [cameraView, setCameraView] = useState<'3q' | 'front' | 'side'>('3q');
   const [isLoading, setIsLoading] = useState(true);
 
-  const stateRef = useRef<{
-    renderer: THREE.WebGLRenderer | null;
-    scene: THREE.Scene | null;
-    camera: THREE.PerspectiveCamera | null;
-    char: LoadedCharacter | null;
-    activeStrike: number;
-    strikeProgress: number;
-    targetCamPos: THREE.Vector3;
-    isDragging: boolean;
-    prevMousePos: { x: number; y: number };
-    reqId: number | null;
-  }>({
-    renderer: null,
-    scene: null,
-    camera: null,
-    char: null,
-    activeStrike: 0,
-    strikeProgress: 0,
-    targetCamPos: new THREE.Vector3(1.15, 0.15, 2.75),
-    isDragging: false,
-    prevMousePos: { x: 0, y: 0 },
-    reqId: null,
-  });
+  // Latest props for the animation loop (the loop is created only once)
+  const propsRef = useRef({ sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete });
+  propsRef.current = { sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete };
 
+  // Drill playback state
+  const playRef = useRef({ cursor: -START_DELAY, lastIdx: -1, impacted: false });
+  // Bag state (set after the character is measured)
+  const bagRef = useRef<{
+    bag: PunchingBag;
+    reach: Record<number, Reach>;
+    origin: THREE.Vector3;
+    forward: THREE.Vector3;
+    dist: number;
+    y: number;
+    initialised: boolean;
+  } | null>(null);
+
+  // A new drill (or bag on/off) restarts the sequence from the 1st punch
+  const seqKey = sequence.join(',') + '|' + (useBag ? 'bag' : 'air');
   useEffect(() => {
-    if (currentPunch > 0) {
-      stateRef.current.activeStrike = currentPunch;
-      stateRef.current.strikeProgress = 0;
-
-      const punchNames: Record<number, string> = {
-        1: '1: Lead Jab',
-        2: '2: Power Cross',
-        3: '3: Lead Left Hook',
-        4: '4: Rear Right Hook',
-        5: '5: Lead Left Uppercut',
-        6: '6: Rear Right Uppercut',
-      };
-      setLastPunchName(punchNames[currentPunch] || 'Strike');
-
-      if (currentPunch === 1) sounds.playPunchImpact('jab');
-      else if (currentPunch === 2) sounds.playPunchImpact('cross');
-      else if (currentPunch === 3 || currentPunch === 4) sounds.playPunchImpact('hook');
-      else sounds.playPunchImpact('uppercut');
-    }
-  }, [currentPunch]);
+    playRef.current = { cursor: -START_DELAY, lastIdx: -1, impacted: false };
+    bagRef.current?.bag.reset();
+  }, [seqKey]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -83,16 +105,17 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
     const heightPx = container.clientHeight || 440;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0c0714); // Deep combat crimson/navy
+    scene.background = new THREE.Color(0x0c0714);
 
     const camera = new THREE.PerspectiveCamera(38, width / heightPx, 0.1, 100);
-    camera.position.set(1.15, 0.15, 2.75);
+    camera.position.set(2.5, 0.4, 2.5);
 
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     } catch (err) {
       console.warn('WebGL context creation failed in Boxing3DModel:', err);
+      setIsLoading(false);
       return;
     }
     renderer.setSize(width, heightPx);
@@ -100,202 +123,306 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
+    while (container.firstChild) container.removeChild(container.firstChild);
     container.appendChild(renderer.domElement);
 
-    // Dynamic Arena Lighting
-    const ambLight = new THREE.AmbientLight(0xffe4e6, 0.85);
-    scene.add(ambLight);
-
+    // Arena lighting
+    scene.add(new THREE.AmbientLight(0xffe4e6, 0.85));
     const redSpot = new THREE.SpotLight(0xef4444, 2.5);
     redSpot.position.set(3, 4, 3);
     redSpot.castShadow = true;
     scene.add(redSpot);
-
     const blueSpot = new THREE.SpotLight(0x38bdf8, 1.8);
     blueSpot.position.set(-3, 3, 2);
     scene.add(blueSpot);
-
     const rimLight = new THREE.DirectionalLight(0xffffff, 1.2);
     rimLight.position.set(0, 3, -3);
     scene.add(rimLight);
 
-    // Combat Canvas Platform (Grounded at y = -0.90)
+    // Training floor
     const ringFloor = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.5, 1.6, 0.08, 48),
+      new THREE.CylinderGeometry(1.7, 1.8, 0.08, 56),
       new THREE.MeshStandardMaterial({ color: 0x181024, roughness: 0.6, metalness: 0.3 })
     );
-    ringFloor.position.y = -0.945;
+    ringFloor.position.y = FLOOR_Y - 0.04;
     ringFloor.receiveShadow = true;
     scene.add(ringFloor);
 
-    // Red Inner Target Ring
     const redRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.35, 1.40, 48),
+      new THREE.RingGeometry(1.5, 1.56, 56),
       new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide, transparent: true, opacity: 0.6 })
     );
     redRing.rotation.x = Math.PI / 2;
-    redRing.position.y = -0.903;
+    redRing.position.y = FLOOR_Y + 0.003;
     scene.add(redRing);
 
-    stateRef.current.renderer = renderer;
-    stateRef.current.scene = scene;
-    stateRef.current.camera = camera;
+    let char: LoadedCharacter | null = null;
+    const lookAt = new THREE.Vector3(0, 0.05, 0);
+    let fitBox: THREE.Box3 | null = null;
+    let camDir = new THREE.Vector3(1, 0.15, 1).normalize();
+
+    const getBone = (name: string): THREE.Bone | undefined =>
+      char ? char.bones['mixamorig' + name] || char.bones['mixamorig:' + name] : undefined;
+
+    // Put the (fixed) camera far enough away that the whole fit box is visible
+    const fitCamera = () => {
+      if (!fitBox) return;
+      const center = fitBox.getCenter(new THREE.Vector3());
+      const corners: THREE.Vector3[] = [];
+      for (const x of [fitBox.min.x, fitBox.max.x])
+        for (const y of [fitBox.min.y, fitBox.max.y])
+          for (const z of [fitBox.min.z, fitBox.max.z]) corners.push(new THREE.Vector3(x, y, z));
+      let d = 1.6;
+      for (let i = 0; i < 200; i++) {
+        camera.position.copy(center).addScaledVector(camDir, d);
+        camera.lookAt(center);
+        camera.updateMatrixWorld(true);
+        const fits = corners.every((c) => {
+          const n = c.clone().project(camera);
+          return Math.abs(n.x) <= 0.9 && Math.abs(n.y) <= 0.86;
+        });
+        if (fits) break;
+        d *= 1.03;
+      }
+      lookAt.copy(center);
+    };
 
     setIsLoading(true);
-    createCharacterInstance('CHAR-M-01')
-      .then((char) => {
+    createCharacterInstance(characterId, avatarConfig)
+      .then((c) => {
         if (isDisposed) return;
-        scene.add(char.scene);
+        char = c;
+        scene.add(c.scene);
 
-        // Attach Pro Sparring Gloves to wrists
+        // Red boxing gloves on both hands
         const createGlove = () => {
           const g = new THREE.Group();
           const knuckle = new THREE.Mesh(
             new THREE.SphereGeometry(0.085, 16, 16),
-            new THREE.MeshStandardMaterial({
-              color: 0xdc2626, // Crimson red leather
-              roughness: 0.35,
-              metalness: 0.20,
-            })
+            new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35, metalness: 0.2 })
           );
           knuckle.scale.set(1.0, 1.25, 0.85);
-
           const cuff = new THREE.Mesh(
             new THREE.CylinderGeometry(0.065, 0.07, 0.06, 16),
-            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 }) // White wrist tape
+            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 })
           );
           cuff.position.y = -0.06;
           g.add(knuckle, cuff);
           return g;
         };
+        getBone('LeftHand')?.add(createGlove());
+        getBone('RightHand')?.add(createGlove());
 
-        const lHand = char.bones.mixamorigLeftHand || char.bones['mixamorig:LeftHand'] || char.bones.handL;
-        const rHand = char.bones.mixamorigRightHand || char.bones['mixamorig:RightHand'] || char.bones.handR;
+        // ---- Measure the boxer once: which way he faces and how far each punch reaches ----
+        applyExerciseKinematics(c, 'box_guard', 0, 0);
+        c.scene.updateMatrixWorld(true);
+        const origin = (getBone('Hips') as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+        const forward = new THREE.Vector3(0, 0, 1)
+          .applyQuaternion(c.scene.getWorldQuaternion(new THREE.Quaternion()));
+        forward.y = 0;
+        forward.normalize();
+        const left = new THREE.Vector3().crossVectors(UP, forward).normalize();
 
-        if (lHand) lHand.add(createGlove());
-        if (rHand) rHand.add(createGlove());
+        const bodyBox = new THREE.Box3();
+        const tmp = new THREE.Vector3();
+        const addBones = () => {
+          c.scene.updateMatrixWorld(true);
+          Object.values(c.bones).forEach((b) => {
+            b.getWorldPosition(tmp);
+            bodyBox.expandByPoint(tmp);
+          });
+        };
+        addBones();
 
-        stateRef.current.char = char;
+        const reach: Record<number, Reach> = {};
+        for (const n of [1, 2, 3, 4, 5, 6]) {
+          let best: Reach | null = null;
+          for (const ph of [0.5, 1]) {
+            applyExerciseKinematics(c, PUNCHES[n].animationType, ph, 0);
+            addBones();
+            if (ph === 1) {
+              for (const side of ['LeftHand', 'RightHand']) {
+                const h = getBone(side);
+                if (!h) continue;
+                const pos = h.getWorldPosition(new THREE.Vector3());
+                const fwd = pos.clone().sub(origin).dot(forward);
+                if (!best || fwd > best.fwd) best = { fwd, y: pos.y };
+              }
+            }
+          }
+          reach[n] = best ?? { fwd: 0.5, y: 0.1 };
+        }
+        applyExerciseKinematics(c, 'box_guard', 0, 0);
+        c.scene.updateMatrixWorld(true);
+
+        // Punching bag (hangs in front of the boxer, swings along his forward direction)
+        const bag = createPunchingBag(left, { height: BAG_H, radius: BAG_R, chain: BAG_CHAIN });
+        bag.group.visible = false;
+        scene.add(bag.group);
+        bagRef.current = { bag, reach, origin, forward, dist: 0.9, y: 0.1, initialised: false };
+
+        // Camera box = body in every punch + the bag at its nearest and farthest position
+        const fb = bodyBox.clone();
+        const dists = Object.values(reach).map((r) => bagTargetOf(r).dist);
+        const ys = Object.values(reach).map((r) => bagTargetOf(r).y);
+        for (const dd of [Math.min(...dists), Math.max(...dists)]) {
+          const cx = origin.x + forward.x * dd;
+          const cz = origin.z + forward.z * dd;
+          const top = Math.max(...ys) + BAG_H / 2 + BAG_CHAIN + 0.1;
+          const bottom = Math.min(...ys) - BAG_H / 2;
+          fb.expandByPoint(new THREE.Vector3(cx - BAG_R - 0.25, bottom, cz - BAG_R - 0.25));
+          fb.expandByPoint(new THREE.Vector3(cx + BAG_R + 0.25, top, cz + BAG_R + 0.25));
+        }
+        fb.expandByScalar(0.12);
+        fb.expandByPoint(new THREE.Vector3(origin.x, FLOOR_Y, origin.z));
+        fitBox = fb;
+
+        // Camera: from the boxer's left side, a little in front -> he faces the bag
+        camDir = new THREE.Vector3()
+          .addScaledVector(left, 1.0)
+          .addScaledVector(forward, 0.5)
+          .addScaledVector(UP, 0.12)
+          .normalize();
+        fitCamera();
+
         setIsLoading(false);
+        propsRef.current.onReady?.();
       })
       .catch((err) => {
         console.error('Boxing character error:', err);
         setIsLoading(false);
       });
 
-    // Orbit Drag
-    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
-      stateRef.current.isDragging = true;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      stateRef.current.prevMousePos = { x: clientX, y: clientY };
+    // Where the bag has to hang so the fist lands on it
+    function bagTargetOf(r: Reach) {
+      const frontDist = Math.max(r.fwd + GLOVE_REACH - 0.02, 0.5);
+      return { dist: frontDist + BAG_R, y: Math.max(-0.15, Math.min(0.3, r.y)) };
+    }
+    const bagTargetForSequence = (seq: number[]) => {
+      const st = bagRef.current;
+      if (!st) return { dist: 0.9, y: 0.1 };
+      const rs = seq.map((n) => st.reach[n]).filter(Boolean);
+      if (!rs.length) return { dist: 0.9, y: 0.1 };
+      const fwd = Math.max(...rs.map((r) => r.fwd));
+      const y = rs.reduce((a, r) => a + r.y, 0) / rs.length;
+      return bagTargetOf({ fwd, y });
     };
 
-    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      if (!stateRef.current.isDragging || !stateRef.current.char) return;
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      const deltaX = clientX - stateRef.current.prevMousePos.x;
-      stateRef.current.char.scene.rotation.y += deltaX * 0.015;
-      stateRef.current.prevMousePos = { x: clientX, y: clientY };
+    const handleResize = () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (!w || !h) return;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      fitCamera();
     };
+    window.addEventListener('resize', handleResize);
 
-    const handlePointerUp = () => {
-      stateRef.current.isDragging = false;
-    };
+    // ---- Animation loop ----
+    let last = performance.now();
+    let guardClock = 0;
+    let reqId = 0;
 
-    container.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('mousemove', handlePointerMove);
-    window.addEventListener('mouseup', handlePointerUp);
-    container.addEventListener('touchstart', handlePointerDown, { passive: true });
-    window.addEventListener('touchmove', handlePointerMove, { passive: true });
-    window.addEventListener('touchend', handlePointerUp);
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const currentDist = stateRef.current.targetCamPos.length();
-      const newDist = Math.max(1.7, Math.min(4.2, currentDist + e.deltaY * 0.0025));
-      stateRef.current.targetCamPos.setLength(newDist);
-    };
-    container.addEventListener('wheel', handleWheel, { passive: false });
-
-    // KINETIC BOXING MOVEMENT LOOP
-    let clock = 0;
-    const animate = () => {
-      clock += 0.035;
-      const char = stateRef.current.char;
-      const strike = stateRef.current.activeStrike;
+    const animate = (time: number) => {
+      const dt = Math.min((time - last) / 1000, 0.1);
+      last = time;
+      const p = propsRef.current;
+      const play = playRef.current;
 
       if (char) {
-        if (strike > 0) {
-          stateRef.current.strikeProgress += 0.14;
-          const p = Math.min(1, stateRef.current.strikeProgress);
+        if (!p.isPaused) {
+          guardClock += dt;
+          play.cursor += dt * p.speed;
+        }
 
-          const punchAnimMap: Record<number, string> = {
-            1: 'box_jab',
-            2: 'box_cross',
-            3: 'box_left_hook',
-            4: 'box_right_hook',
-            5: 'box_left_uppercut',
-            6: 'box_right_uppercut',
-          };
-          const punchType = punchAnimMap[strike] || 'box_jab';
-          applyExerciseKinematics(char, punchType, Math.sin(p * Math.PI), clock);
-
-          if (p >= 1) {
-            stateRef.current.activeStrike = 0;
-            stateRef.current.strikeProgress = 0;
-            if (onPunchComplete) onPunchComplete(strike);
-          }
+        const seq = p.sequence;
+        if (seq.length === 0 || play.cursor < 0) {
+          applyExerciseKinematics(char, 'box_guard', 0, guardClock);
         } else {
-          // Dynamic Orthodox Guard Stance with rhythm bounce
-          applyExerciseKinematics(char, 'box_guard', 0, clock);
+          const n = seq.length;
+          const resetGap = n === 1 ? 0.3 : 0.7;
+          const total = n * PUNCH_TIME + resetGap;
+
+          if (play.cursor >= total) {
+            play.cursor -= total;
+            play.lastIdx = -1;
+            play.impacted = false;
+            p.onSequenceComplete?.();
+          }
+
+          const idx = Math.floor(play.cursor / PUNCH_TIME);
+          if (idx < n) {
+            const local = (play.cursor - idx * PUNCH_TIME) / PUNCH_TIME;
+            const punch = seq[idx];
+            if (idx !== play.lastIdx) {
+              play.lastIdx = idx;
+              play.impacted = false;
+              p.onPunchStart?.(idx, punch);
+            }
+            if (!play.impacted && local >= PEAK_AT) {
+              play.impacted = true;
+              sounds.playPunchImpact(PUNCHES[punch].sound);
+              if (p.useBag) bagRef.current?.bag.hit(PUNCHES[punch].power);
+            }
+            applyExerciseKinematics(char, PUNCHES[punch].animationType, punchShape(local), guardClock);
+          } else {
+            if (play.lastIdx !== n) {
+              play.lastIdx = n;
+              p.onPunchStart?.(-1, 0);
+            }
+            applyExerciseKinematics(char, 'box_guard', 0, guardClock);
+          }
+        }
+        char.scene.updateMatrixWorld(true);
+      }
+
+      // Bag: slide to the right distance for this drill and swing
+      const bs = bagRef.current;
+      if (bs) {
+        bs.bag.group.visible = p.useBag;
+        if (p.useBag) {
+          const target = bagTargetForSequence(p.sequence);
+          if (!bs.initialised) {
+            bs.dist = target.dist;
+            bs.y = target.y;
+            bs.initialised = true;
+          } else {
+            const k = Math.min(1, dt * 5);
+            bs.dist += (target.dist - bs.dist) * k;
+            bs.y += (target.y - bs.y) * k;
+          }
+          bs.bag.group.position.set(
+            bs.origin.x + bs.forward.x * bs.dist,
+            bs.y + BAG_H / 2 + BAG_CHAIN,
+            bs.origin.z + bs.forward.z * bs.dist
+          );
+          bs.bag.update(dt);
         }
       }
 
-      camera.position.lerp(stateRef.current.targetCamPos, 0.08);
-      camera.lookAt(0, 0.05, 0);
-
+      camera.lookAt(lookAt);
       renderer.render(scene, camera);
-      stateRef.current.reqId = requestAnimationFrame(animate);
+      reqId = requestAnimationFrame(animate);
     };
-
-    stateRef.current.reqId = requestAnimationFrame(animate);
+    reqId = requestAnimationFrame(animate);
 
     return () => {
       isDisposed = true;
-      if (stateRef.current.reqId) cancelAnimationFrame(stateRef.current.reqId);
-      container.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('mousemove', handlePointerMove);
-      window.removeEventListener('mouseup', handlePointerUp);
-      container.removeEventListener('touchstart', handlePointerDown);
-      window.removeEventListener('touchmove', handlePointerMove);
-      window.removeEventListener('touchend', handlePointerUp);
-      container.removeEventListener('wheel', handleWheel);
+      cancelAnimationFrame(reqId);
+      window.removeEventListener('resize', handleResize);
+      bagRef.current?.bag.dispose();
+      bagRef.current = null;
       renderer.dispose();
     };
-  }, []);
-
-  const setViewAngle = (view: '3q' | 'front' | 'side') => {
-    setCameraView(view);
-    if (view === '3q') stateRef.current.targetCamPos.set(1.15, 0.15, 2.75);
-    else if (view === 'front') stateRef.current.targetCamPos.set(0, 0.1, 2.85);
-    else stateRef.current.targetCamPos.set(2.85, 0.1, 0.1);
-  };
-
-  const handleZoom = (direction: 'in' | 'out') => {
-    const currentDist = stateRef.current.targetCamPos.length();
-    const factor = direction === 'in' ? 0.85 : 1.15;
-    const newDist = Math.max(1.7, Math.min(4.2, currentDist * factor));
-    stateRef.current.targetCamPos.setLength(newDist);
-  };
+  }, [characterId, avatarConfig]);
 
   return (
-    <div className={`relative w-full overflow-hidden rounded-3xl bg-gradient-to-b from-red-950/30 via-neutral-950 to-black ${className}`} style={{ height }}>
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+    <div
+      className={`relative w-full overflow-hidden rounded-3xl bg-gradient-to-b from-red-950/30 via-neutral-950 to-black ${className}`}
+      style={{ height }}
+    >
+      <div ref={containerRef} className="w-full h-full" />
 
       {isLoading && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md">
@@ -303,76 +430,6 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
           <span className="text-xs font-mono font-bold text-neutral-300 tracking-wider uppercase">
             Loading Combat Boxer...
           </span>
-        </div>
-      )}
-
-      {/* Top HUD: Punch Name & Camera Presets */}
-      <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none z-10">
-        <div className="flex items-center gap-2 bg-red-950/80 border border-red-500/40 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-lg">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-          <span className="text-xs font-mono font-bold text-red-200 uppercase">{lastPunchName}</span>
-        </div>
-
-        {/* Camera Views & Zoom */}
-        <div className="flex items-center gap-1 bg-black/80 border border-neutral-800 backdrop-blur-md p-1 rounded-2xl pointer-events-auto shadow-lg">
-          {(['3q', 'front', 'side'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setViewAngle(v)}
-              className={`px-2.5 py-1 text-xs font-bold rounded-xl uppercase transition ${
-                cameraView === v ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white'
-              }`}
-            >
-              {v === '3q' ? '3/4 Side' : v}
-            </button>
-          ))}
-
-          <div className="h-4 w-px bg-neutral-800 mx-0.5" />
-
-          <button
-            onClick={() => handleZoom('in')}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={() => handleZoom('out')}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={() => setViewAngle('3q')}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800/80 transition"
-            title="Reset Angle"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Combo Sequence Visualizer */}
-      {comboSequence.length > 0 && (
-        <div className="absolute bottom-3 inset-x-3 flex items-center justify-center gap-2 pointer-events-none z-10">
-          <div className="flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-neutral-800 px-3 py-2 rounded-2xl shadow-xl">
-            <span className="text-[10px] uppercase font-bold text-neutral-400 mr-1">Combo:</span>
-            {comboSequence.map((num, i) => (
-              <span
-                key={i}
-                className={`w-7 h-7 flex items-center justify-center rounded-xl text-xs font-mono font-black transition-transform ${
-                  currentPunch === num
-                    ? 'bg-red-500 text-white scale-125 shadow-[0_0_12px_rgba(239,68,68,0.8)]'
-                    : 'bg-neutral-800 text-neutral-300'
-                }`}
-              >
-                {num}
-              </span>
-            ))}
-          </div>
         </div>
       )}
     </div>
