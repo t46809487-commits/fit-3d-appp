@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile, WorkoutLog } from '../../types';
 import { loginWithGoogle, logoutUser, auth } from '../../firebase';
+import { LOGIN_REQUIRED } from '../../config';
 import { User as FbUser } from 'firebase/auth';
 import { Flame, Clock, Award, Shield, LogIn, LogOut, CheckCircle, Calendar, Dumbbell, Trophy, RefreshCw, Crown, Sparkles } from 'lucide-react';
 
@@ -99,6 +100,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </button>
           )}
 
+          {(LOGIN_REQUIRED || currentUser) && (
           <button
             onClick={handleAuthAction}
             disabled={isSyncing}
@@ -120,6 +122,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </>
             )}
           </button>
+          )}
         </div>
       </div>
 
