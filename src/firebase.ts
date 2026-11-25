@@ -5,9 +5,6 @@ import {
   GoogleAuthProvider,
   FacebookAuthProvider,
   signInAnonymously,
-  signInWithPhoneNumber,
-  RecaptchaVerifier,
-  ConfirmationResult,
   setPersistence,
   browserLocalPersistence,
   signOut as fbSignOut,
@@ -126,7 +123,7 @@ export async function logoutUser(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Login methods: Google, Facebook, Phone (OTP) and Guest.
+// Login methods: Google, Facebook and Guest.
 // None of these functions store passwords or OTP codes: Firebase Auth does the
 // verification on Google's servers and only returns a signed-in user.
 // ---------------------------------------------------------------------------
@@ -146,17 +143,9 @@ export async function loginAsGuest(): Promise<User> {
   return result.user;
 }
 
-export function createRecaptcha(containerId: string): RecaptchaVerifier {
-  return new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
-}
-
-// phoneE164 must look like +919876543210
-export function sendPhoneOtp(phoneE164: string, verifier: RecaptchaVerifier): Promise<ConfirmationResult> {
-  return signInWithPhoneNumber(auth, phoneE164, verifier);
-}
-
 // Turns Firebase error codes into short messages the user can act on
 export function authErrorMessage(error: unknown): string {
+  console.warn('[FIT3D auth error]', error);
   const code = (error as { code?: string } | null)?.code || '';
   switch (code) {
     case 'auth/popup-closed-by-user':
@@ -186,7 +175,15 @@ export function authErrorMessage(error: unknown): string {
       return 'Security check fail ho gaya. Page refresh karke dobara try karo.';
     case 'auth/network-request-failed':
       return 'Internet connection check karo.';
+    case 'auth/billing-not-enabled':
+      return 'Asli SMS bhejne ke liye Firebase project par billing (Blaze plan) on honi chahiye. Test number use karo ya billing on karo.';
+    case 'auth/invalid-app-credential':
+    case 'auth/app-not-authorized':
+      return 'Firebase ne is website ko OTP bhejne se roka (reCAPTCHA / API key ki setting). Google Cloud me API key ke restrictions check karo.';
+    case 'auth/internal-error':
+      return 'Firebase me andar ki dikkat aayi (auth/internal-error). Thodi der baad try karo.';
     default:
-      return 'Kuch galat ho gaya. Dobara try karo.';
+      // Show the real code so the problem can be found quickly
+      return code ? `Kuch galat ho gaya (${code}). Dobara try karo.` : 'Kuch galat ho gaya. Dobara try karo.';
   }
 }
