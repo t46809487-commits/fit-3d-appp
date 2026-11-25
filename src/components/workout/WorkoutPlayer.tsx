@@ -4,7 +4,7 @@ import { Human3DModel } from '../3d/Human3DModel';
 import { sounds } from '../../utils/audio';
 import confetti from 'canvas-confetti';
 import { Play, Pause, SkipForward, X, CheckCircle, Flame, Clock, Dumbbell, Award, Plus, Mic, MicOff, Music } from 'lucide-react';
-import { CoachPanel } from '../Coach/CoachPanel'
+import { CoachPanel } from '../coachpanel/CoachPanel';
 import {
   coach,
   encouragement,
