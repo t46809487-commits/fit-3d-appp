@@ -71,7 +71,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
 
   const bodyParts = ['All', 'Chest', 'Back', 'Arms', 'Shoulders', 'Abs', 'Legs', 'Full Body', 'Boxing', 'Mobility'];
   const goals = ['All', 'Fat Loss', 'Build Muscle', 'Build Abs', 'Boxing', 'Mobility'];
-  const equipmentOptions = ['All', 'No Equipment', 'Dumbbells', 'Barbell', 'Resistance Band'];
+  const equipmentOptions = ['All', 'No Equipment', 'Dumbbells', 'Barbell', 'Resistance Band', 'Bench', 'Pull-Up Bar'];
   const difficulties = ['All', 'Beginner', 'Intermediate', 'Advanced'];
 
   return (
@@ -276,6 +276,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
                       primaryMuscles={exercise.primaryMuscles}
                       secondaryMuscles={exercise.secondaryMuscles}
                       animationType={exercise.animationType}
+                      equipment={exercise.equipment}
                       height="100%"
                       showControls={false}
                       interactive={false}
