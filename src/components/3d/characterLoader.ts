@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MuscleName, CharacterModelId, AvatarConfiguration } from '../../types';
 import { createAnatomicalHumanRig } from './anatomicalRig';
-import { EXERCISE_MOTIONS, MOTION_ALIAS } from './exercisePoses';
+import { EXERCISE_MOTIONS, MOTION_ALIAS } from "./exercisePoses";
 import { applyMotion } from './poseEngine';
 
 export interface LoadedCharacter {
