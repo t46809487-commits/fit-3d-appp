@@ -66,6 +66,7 @@ export const ExerciseDetailModal: React.FC<ExerciseDetailModalProps> = ({
             primaryMuscles={exercise.primaryMuscles}
             secondaryMuscles={exercise.secondaryMuscles}
             animationType={exercise.animationType}
+            equipment={exercise.equipment}
             characterId={characterId || exercise.characterId || 'CHAR-M-01'}
             avatarConfig={avatarConfig}
             height="100%"
