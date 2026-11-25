@@ -35,6 +35,7 @@ import {
 import { EXERCISES_DATABASE } from './data/exercises';
 import { PRESET_WORKOUTS, CATEGORY_WORKOUTS, generateWorkoutPlan } from './data/workouts';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { LOGIN_REQUIRED } from './config';
 import { LockedScreen, LoginRequiredModal } from './components/auth/AccessGate';
 import { getDefaultAvatarConfig } from './data/subscriptions';
 
@@ -546,7 +547,7 @@ export default function App() {
       </div>
     );
   }
-  if (!currentUser) {
+  if (!currentUser && LOGIN_REQUIRED) {
     return <LoginScreen />;
   }
 
