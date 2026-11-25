@@ -257,7 +257,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   onChange={(e) => setEquipment(e.target.value as EquipmentType)}
                   className="w-full p-2.5 rounded-xl bg-neutral-800 border border-neutral-700 text-white"
                 >
-                  {['No Equipment', 'Dumbbells', 'Barbell', 'Resistance Band', 'Cable Machine', 'Full Gym'].map(eq => (
+                  {['No Equipment', 'Dumbbells', 'Barbell', 'Resistance Band', 'Bench', 'Pull-Up Bar', 'Cable Machine', 'Full Gym'].map(eq => (
                     <option key={eq} value={eq}>{eq}</option>
                   ))}
                 </select>
