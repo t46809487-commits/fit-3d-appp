@@ -19,6 +19,8 @@ export type EquipmentType =
   | 'Dumbbells'
   | 'Barbell'
   | 'Resistance Band'
+  | 'Bench'
+  | 'Pull-Up Bar'
   | 'Cable Machine'
   | 'Full Gym';
 
@@ -307,4 +309,3 @@ export interface BoxingCombo {
   roundTimeSeconds: number;
   calories: number;
 }
-
