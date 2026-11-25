@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { MuscleName, CharacterModelId, AnimationState, AvatarConfiguration } from '../../types';
+import { MuscleName, CharacterModelId, AnimationState, AvatarConfiguration, EquipmentType } from '../../types';
 import {
   LoadedCharacter,
   createCharacterInstance,
   applyExerciseKinematics,
   updateMuscleHighlights,
 } from './characterLoader';
-import { EQUIPMENT, createEquipment, Equipment } from './equipmentProps';
+import { EXERCISE_MOTIONS } from './exercisePoses';
 import { Bone, Play, Pause, Zap, Info, ShieldCheck, Loader2 } from 'lucide-react';
 
 interface Human3DModelProps {
@@ -16,6 +16,8 @@ interface Human3DModelProps {
   animationType?: string;
   characterId?: CharacterModelId;
   avatarConfig?: AvatarConfiguration;
+  /** Equipment the exercise needs. Dumbbells, resistance band, bench and pull-up bar are drawn in 3D. */
+  equipment?: EquipmentType[];
   isPaused?: boolean;
   playbackSpeed?: number;
   height?: number | string;
@@ -51,7 +53,7 @@ const FLOOR_Y = -0.905;
 
 // Plays one full rep offline (no rendering) and returns the box that contains the whole body
 // at every moment of the exercise. Used once per exercise to frame the camera.
-function computeMotionBounds(char: LoadedCharacter, animationType: string, equipment?: Equipment | null): THREE.Box3 {
+function computeMotionBounds(char: LoadedCharacter, animationType: string): THREE.Box3 {
   const box = new THREE.Box3();
   const p = new THREE.Vector3();
   const N = 24;
@@ -63,15 +65,12 @@ function computeMotionBounds(char: LoadedCharacter, animationType: string, equip
       b.getWorldPosition(p);
       box.expandByPoint(p);
     });
-    if (equipment) {
-      equipment.update();
-      box.union(new THREE.Box3().setFromObject(equipment.group));
-    }
   }
   applyExerciseKinematics(char, animationType, 0, 0);
   char.scene.updateMatrixWorld(true);
   box.expandByScalar(0.14);                          // body thickness / head / hands
-  box.expandByPoint(new THREE.Vector3(0, FLOOR_Y, 0)); // keep the floor in view
+  // keep the floor in view (not for hanging exercises such as pull-ups)
+  if (!EXERCISE_MOTIONS[animationType]?.bar) box.expandByPoint(new THREE.Vector3(0, FLOOR_Y, 0));
   return box;
 }
 
@@ -105,6 +104,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
   animationType = 'idle',
   characterId = 'CHAR-M-01',
   avatarConfig,
+  equipment = [],
   isPaused = false,
   playbackSpeed = 1,
   height = '100%',
@@ -141,7 +141,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     char: LoadedCharacter | null;
     skeletonHelper: THREE.SkeletonHelper | null;
     box: THREE.Box3 | null;
-    equipment: Equipment | null;
     lookAt: THREE.Vector3;
     animTime: number;
     reqId: number | null;
@@ -152,7 +151,6 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     char: null,
     skeletonHelper: null,
     box: null,
-    equipment: null,
     lookAt: new THREE.Vector3(0, 0.05, 0),
     animTime: 0,
     reqId: null,
@@ -242,6 +240,141 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     propBox.receiveShadow = true;
     scene.add(propBox);
 
+    // ---- Equipment props: dumbbells, resistance band, pull-up bar --------------------------
+    const equipSet = new Set<EquipmentType>(equipment);
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.45, metalness: 0.6 });
+    const chromeMat = new THREE.MeshStandardMaterial({ color: 0xb9bec6, roughness: 0.25, metalness: 0.9 });
+    const bandMat = new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.6, metalness: 0.0 });
+    const Y_AXIS = new THREE.Vector3(0, 1, 0);
+    const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+    const dumbbells: THREE.Group[] = [];
+    if (equipSet.has('Dumbbells')) {
+      for (let i = 0; i < 2; i++) {
+        const g = new THREE.Group();
+        const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.15, 12), chromeMat);
+        handle.rotation.x = Math.PI / 2; // handle runs along local Z
+        g.add(handle);
+        for (const z of [-0.085, 0.085]) {
+          const head = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.04, 20), metalMat);
+          head.rotation.x = Math.PI / 2;
+          head.position.z = z;
+          head.castShadow = true;
+          g.add(head);
+        }
+        g.visible = false;
+        scene.add(g);
+        dumbbells.push(g);
+      }
+    }
+
+    const bandSegs: THREE.Mesh[] = [];
+    let anchorPole: THREE.Mesh | null = null;
+    if (equipSet.has('Resistance Band')) {
+      for (let i = 0; i < 2; i++) {
+        const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 8), bandMat);
+        seg.visible = false;
+        scene.add(seg);
+        bandSegs.push(seg);
+      }
+      anchorPole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.6, 14), metalMat);
+      anchorPole.visible = false;
+      scene.add(anchorPole);
+    }
+
+    let barGroup: THREE.Group | null = null;
+    let barPosts: THREE.Mesh[] = [];
+    if (equipSet.has('Pull-Up Bar')) {
+      barGroup = new THREE.Group();
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.3, 16), chromeMat);
+      bar.rotation.z = Math.PI / 2; // bar runs left-right
+      barGroup.add(bar);
+      barPosts = [-0.65, 0.65].map((x) => {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 12), metalMat);
+        post.position.x = x;
+        barGroup!.add(post);
+        return post;
+      });
+      barGroup.visible = false;
+      scene.add(barGroup);
+    }
+
+    const tA = new THREE.Vector3();
+    const tB = new THREE.Vector3();
+    const tD = new THREE.Vector3();
+    const tL = new THREE.Vector3();
+    const tF = new THREE.Vector3();
+    const fist: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3()];
+    let bandAnchor: THREE.Vector3 | null = null;
+
+    const placeSegment = (m: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3) => {
+      tD.copy(b).sub(a);
+      const len = tD.length();
+      m.position.copy(a).addScaledVector(tD, 0.5);
+      m.scale.set(1, Math.max(len, 0.001), 1);
+      m.quaternion.setFromUnitVectors(Y_AXIS, tD.normalize());
+      m.visible = true;
+    };
+
+    const updateEquipment = (char: LoadedCharacter) => {
+      char.scene.updateMatrixWorld(true);
+      const bones = char.bones;
+      const sides: Array<[string, string]> = [
+        ['mixamorigLeftHand', 'mixamorigLeftForeArm'],
+        ['mixamorigRightHand', 'mixamorigRightForeArm'],
+      ];
+      // body's left-right axis in world space: dumbbell handles are kept across it
+      tL.set(1, 0, 0).applyQuaternion(char.scene.quaternion);
+      sides.forEach(([hn, fn], i) => {
+        const hand = bones[hn];
+        const fore = bones[fn];
+        if (!hand || !fore) return;
+        hand.getWorldPosition(tA);
+        fore.getWorldPosition(tB);
+        tD.copy(tA).sub(tB).normalize(); // forearm direction (elbow -> wrist)
+        fist[i].copy(tA).addScaledVector(tD, 0.08);
+        const db = dumbbells[i];
+        if (db) {
+          const h = tB.copy(tL).addScaledVector(tD, -tL.dot(tD));
+          if (h.lengthSq() < 1e-4) h.set(0, 0, 1);
+          h.normalize();
+          db.position.copy(fist[i]);
+          db.quaternion.setFromUnitVectors(Z_AXIS, h);
+          db.visible = true;
+        }
+      });
+
+      if (bandSegs.length === 2 && anchorPole) {
+        if (!bandAnchor) {
+          // door-anchor point: in front of the hands at the start of the exercise
+          tF.set(0, 0, 1).applyQuaternion(char.scene.quaternion);
+          tF.y = 0;
+          if (tF.lengthSq() < 1e-4) tF.set(0, 0, 1);
+          tF.normalize();
+          bandAnchor = fist[0].clone().add(fist[1]).multiplyScalar(0.5).addScaledVector(tF, 0.75);
+        }
+        placeSegment(bandSegs[0], fist[0], bandAnchor);
+        placeSegment(bandSegs[1], fist[1], bandAnchor);
+        anchorPole.position.set(bandAnchor.x, FLOOR_Y + 0.8, bandAnchor.z);
+        anchorPole.visible = true;
+      }
+
+      if (barGroup) {
+        const bar = char.scene.userData.bar as { x: number; z: number; height: number; yaw: number } | undefined;
+        if (bar) {
+          barGroup.visible = true;
+          barGroup.position.set(bar.x, FLOOR_Y + bar.height, bar.z);
+          barGroup.rotation.y = bar.yaw;
+          barPosts.forEach((post) => {
+            post.scale.y = bar.height;
+            post.position.y = -bar.height / 2;
+          });
+        } else {
+          barGroup.visible = false;
+        }
+      }
+    };
+
     stateRef.current.renderer = renderer;
     stateRef.current.scene = scene;
     stateRef.current.camera = camera;
@@ -264,15 +397,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         stateRef.current.skeletonHelper = skelHelper;
 
         // Frame the whole exercise once; the camera never moves after this
-        // Equipment (dumbbells, bench, bar, band, cable ...) for this exercise
-        const specs = EQUIPMENT[animationType];
-        let equipment: Equipment | null = null;
-        if (specs && specs.length) {
-          equipment = createEquipment(char, specs, () => applyExerciseKinematics(char, animationType, 0, 0));
-          scene.add(equipment.group);
-          stateRef.current.equipment = equipment;
-        }
-        const box = computeMotionBounds(char, animationType, equipment);
+        const box = computeMotionBounds(char, animationType);
         box.expandByVector(new THREE.Vector3(0.3, 0, 0.3));      // mat margin around the body
         const mSize = box.getSize(new THREE.Vector3());
         const mCentre = box.getCenter(new THREE.Vector3());
@@ -325,17 +450,16 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
         // Apply joint kinematics to connected humanoid character
         applyExerciseKinematics(char, animationType, phase, t);
-        // Keep dumbbells / bar / band / cable attached to the hands and feet
-        stateRef.current.equipment?.update();
+        if (equipSet.size > 0) updateEquipment(char);
       }
 
       // Step / bench prop and camera focus for floor exercises (set by the pose engine)
       const plat = char
-        ? (char.scene.userData.platform as { x: number; z: number; height: number; yaw: number } | undefined)
+        ? (char.scene.userData.platform as { x: number; z: number; height: number; yaw: number; w?: number; d?: number } | undefined)
         : undefined;
       if (plat) {
         propBox.visible = true;
-        propBox.scale.set(0.55, plat.height, 0.42);
+        propBox.scale.set(plat.w ?? 0.55, plat.height, plat.d ?? 0.42);
         propBox.position.set(plat.x, -0.905 + plat.height / 2, plat.z);
         propBox.rotation.y = plat.yaw;
       } else {
@@ -353,14 +477,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     return () => {
       isDisposed = true;
       if (stateRef.current.reqId) cancelAnimationFrame(stateRef.current.reqId);
-      if (stateRef.current.equipment) {
-        stateRef.current.equipment.dispose();
-        stateRef.current.equipment = null;
-      }
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [animationType, selectedGender, avatarConfig]);
+  }, [animationType, selectedGender, avatarConfig, equipment.join('|')]);
 
   // Update muscle highlights whenever props change
   useEffect(() => {
