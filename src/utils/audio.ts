@@ -1,3 +1,5 @@
+import { coach } from '../services/coach';
+
 // Web Audio API synthesizer for clean sound effects without external audio assets
 
 class SoundEffects {
@@ -119,17 +121,10 @@ class SoundEffects {
     } catch {}
   }
 
-  // Speak voice countdown cue (e.g. "3", "2", "1", "GO!")
+  // Speak a voice cue (e.g. "3", "2", "1", "GO!"). Goes through the AI Coach so it uses the
+  // coach the user picked and respects the coach on/off switch.
   speak(text: string) {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.1;
-      utterance.pitch = 1.0;
-      utterance.volume = 0.8;
-      window.speechSynthesis.speak(utterance);
-    } catch {}
+    coach.say(text);
   }
 }
 
