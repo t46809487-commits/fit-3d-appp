@@ -10,7 +10,7 @@ export const LockedScreen: React.FC<LockedScreenProps> = ({ onLogin }) => (
     <div className="text-5xl">🔒</div>
     <h2 className="text-xl font-black text-white">Login zaroori hai</h2>
     <p className="text-sm text-neutral-400 max-w-xs">
-      Guest sirf Explore dekh sakta hai. Workout, progress aur profile ke liye Google, Facebook ya mobile number se login karo.
+      Guest sirf Explore dekh sakta hai. Workout, progress aur profile ke liye Google ya Facebook se login karo.
     </p>
     <button
       onClick={onLogin}
@@ -36,7 +36,7 @@ export const LoginRequiredModal: React.FC<LoginRequiredModalProps> = ({ open, on
         <div className="text-4xl">🔒</div>
         <h3 className="text-lg font-black text-white">Pehle login karo</h3>
         <p className="text-sm text-neutral-400">
-          Exercise ya workout chalane ke liye Google, Facebook ya mobile number se login karna zaroori hai.
+          Exercise ya workout chalane ke liye Google ya Facebook se login karna zaroori hai.
         </p>
         <div className="flex gap-3">
           <button
