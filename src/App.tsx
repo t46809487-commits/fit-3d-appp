@@ -51,7 +51,7 @@ import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { AvatarCustomizerModal } from './components/profile/AvatarCustomizerModal';
 import { SubscriptionModal } from './components/profile/SubscriptionModal';
-
+import { LevelPrograms } from './components/workout/LevelPrograms';
 import { Dumbbell, Sparkles, Heart } from 'lucide-react';
 
 const DEFAULT_PROFILE: UserProfile = {
