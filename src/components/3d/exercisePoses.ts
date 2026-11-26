@@ -1428,3 +1428,4 @@ export const EXERCISE_MOTIONS: Record<string, MotionDef> = {
     yaw: 0.55,
   },
 };
+export const MOTION_ALIAS: Record<string, string> = {};
