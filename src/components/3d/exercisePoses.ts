@@ -1428,4 +1428,7 @@ export const EXERCISE_MOTIONS: Record<string, MotionDef> = {
     yaw: 0.55,
   },
 };
+
+// Lets several exercises share one motion under a different animationType name.
+// (Empty for now - characterLoader.ts looks names up here first and falls back to the name itself.)
 export const MOTION_ALIAS: Record<string, string> = {};
