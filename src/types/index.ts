@@ -96,6 +96,10 @@ export interface Exercise {
   instructions: string[];
   commonMistakes: string[];
   breathingPattern: string;
+  /** Short description shown on the exercise details page. */
+  description?: string;
+  /** Important safety tips shown on the exercise details page. */
+  safetyTips?: string[];
   animationId: string; // e.g. ex_pushup_rep
   animationType: string;
   characterId: CharacterModelId; // CHAR-M-01 or CHAR-F-01
