@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Exercise, CharacterModelId, AvatarConfiguration } from '../../types';
 import { Human3DModel } from '../3d/Human3DModel';
-import { X, Heart, Play, Clock, Flame, Dumbbell, AlertTriangle, Wind, Info, Plus } from 'lucide-react';
+import { X, Heart, Play, Clock, Flame, Dumbbell, AlertTriangle, Wind, Info, Plus, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { getExerciseInfo } from '../../data/exerciseInfo';
+import { LEVEL_INFO, muscleLabels } from '../../utils/difficulty';
+import { markExercisesCompleted, unmarkExercise, useWorkoutProgress } from '../../utils/workoutProgress';
 
 interface ExerciseDetailModalProps {
   exercise: Exercise | null;
@@ -27,8 +30,13 @@ export const ExerciseDetailModal: React.FC<ExerciseDetailModalProps> = ({
   avatarConfig,
 }) => {
   const [activeTab, setActiveTab] = useState<'3d' | 'instructions' | 'mistakes'>('3d');
+  const progress = useWorkoutProgress();
 
   if (!isOpen || !exercise) return null;
+
+  const levelInfo = LEVEL_INFO[exercise.difficulty];
+  const { description, safetyTips } = getExerciseInfo(exercise);
+  const done = progress[exercise.id];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in">
@@ -143,6 +151,42 @@ export const ExerciseDetailModal: React.FC<ExerciseDetailModalProps> = ({
             </div>
           </div>
 
+          {/* Overview: description, difficulty, sets / reps / rest */}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`px-2.5 py-1 rounded-full border text-[11px] font-bold uppercase tracking-wider ${levelInfo.chip}`}>
+                {levelInfo.badge} • {exercise.difficulty}
+              </span>
+              {exercise.equipment.map((eq) => (
+                <span key={eq} className="px-2.5 py-1 rounded-full bg-neutral-800 text-neutral-300 text-[11px] font-semibold">{eq}</span>
+              ))}
+            </div>
+            <p className="text-sm text-neutral-300 leading-relaxed">{description}</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-2xl bg-neutral-800/70 py-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">Sets</div>
+                <div className="text-base font-black text-white">{exercise.sets}</div>
+              </div>
+              <div className="rounded-2xl bg-neutral-800/70 py-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">{exercise.durationSeconds ? 'Time' : 'Reps'}</div>
+                <div className="text-base font-black text-white">{exercise.durationSeconds ? `${exercise.durationSeconds}s` : exercise.reps}</div>
+              </div>
+              <div className="rounded-2xl bg-neutral-800/70 py-2.5">
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">Rest</div>
+                <div className="text-base font-black text-white">{exercise.restSeconds}s</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wider font-bold text-neutral-500 mr-1">Target</span>
+              {muscleLabels(exercise.primaryMuscles).map((m) => (
+                <span key={m} className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[11px] font-semibold">{m}</span>
+              ))}
+              {muscleLabels(exercise.secondaryMuscles).map((m) => (
+                <span key={m} className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-300 text-[11px] font-semibold">{m}</span>
+              ))}
+            </div>
+          </div>
+
           {/* Breathing Pattern Cue (PRD page 16) */}
           {exercise.breathingPattern && (
             <div className="flex items-start gap-3 p-3 rounded-2xl bg-cyan-950/30 border border-cyan-800/40 text-cyan-200 text-xs">
@@ -189,10 +233,38 @@ export const ExerciseDetailModal: React.FC<ExerciseDetailModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Safety tips */}
+          {safetyTips.length > 0 && (
+            <div className="space-y-2.5">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" />
+                Safety Tips
+              </h3>
+              <div className="space-y-2">
+                {safetyTips.map((tip, idx) => (
+                  <div key={idx} className="flex items-start gap-2.5 text-xs text-neutral-300">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-neutral-800 bg-neutral-900/90 flex items-center gap-3">
+          <button
+            onClick={() => (done ? unmarkExercise(exercise.id) : markExercisesCompleted([exercise.id]))}
+            className={`px-3.5 py-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 transition active:scale-95 ${
+              done ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-neutral-800 text-neutral-200 hover:bg-neutral-700'
+            }`}
+            title={done ? 'Completed - tap to undo' : 'Mark as completed'}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="hidden sm:inline">{done ? `Done ×${done.count}` : 'Mark done'}</span>
+          </button>
           {onAddToCustomWorkout && (
             <button
               onClick={() => onAddToCustomWorkout(exercise)}
