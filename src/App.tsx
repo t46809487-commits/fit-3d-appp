@@ -46,12 +46,14 @@ import { ProfileScreen } from './components/profile/ProfileScreen';
 import { DietScreen } from './components/diet/DietScreen';
 import { ExerciseDetailModal } from './components/exercise/ExerciseDetailModal';
 import { WorkoutPlayer } from './components/workout/WorkoutPlayer';
+import { WorkoutLibrary } from './components/workout/WorkoutLibrary';
+import { markExercisesCompleted } from './utils/workoutProgress';
 import { BoxingArena } from './components/boxing/BoxingArena';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { AvatarCustomizerModal } from './components/profile/AvatarCustomizerModal';
 import { SubscriptionModal } from './components/profile/SubscriptionModal';
-import { LevelPrograms } from './components/workout/LevelPrograms';
+
 import { Dumbbell, Sparkles, Heart } from 'lucide-react';
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -362,6 +364,8 @@ export default function App() {
     caloriesBurned: number;
     exerciseCount: number;
   }) => {
+    // Mark every exercise of the finished workout as completed (progress tracking)
+    if (activeWorkout) markExercisesCompleted(activeWorkout.exercises.map((e) => e.id));
     setActiveWorkout(null);
 
     const newLog: WorkoutLog = {
@@ -626,6 +630,12 @@ export default function App() {
                 Pick a body part. Every exercise of that muscle group is included, done in 2 rounds.
               </p>
             </div>
+
+            {/* Exercise library: 9 categories x 3 levels, details, progress */}
+            <WorkoutLibrary
+              onStartRoutine={startWorkout}
+              onSelectExercise={(ex) => setSelectedExercise(ex)}
+            />
 
             {/* Body-part workouts */}
             <div className="space-y-3">
