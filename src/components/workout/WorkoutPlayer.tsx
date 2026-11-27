@@ -3,17 +3,7 @@ import { Exercise, WorkoutRoutine, CharacterModelId, AvatarConfiguration } from 
 import { Human3DModel } from '../3d/Human3DModel';
 import { sounds } from '../../utils/audio';
 import confetti from 'canvas-confetti';
-import { Play, Pause, SkipForward, X, CheckCircle, Flame, Clock, Dumbbell, Award, Plus, Mic, MicOff, Music } from 'lucide-react';
-import { CoachPanel } from '../Coach/CoachPanel';
-import {
-  coach,
-  encouragement,
-  exerciseIntro,
-  formCue,
-  restLine,
-  useCoachSettings,
-} from '../../services/coach';
-import { musicPlayer } from '../../services/music';
+import { Play, Pause, SkipForward, X, CheckCircle, Flame, Clock, Dumbbell, Award, Plus } from 'lucide-react';
 
 interface WorkoutPlayerProps {
   routine: WorkoutRoutine;
@@ -43,81 +33,26 @@ export const WorkoutPlayer: React.FC<WorkoutPlayerProps> = ({
   const [timeLeft, setTimeLeft] = useState<number>(45); // default exercise active time
   const [totalSecondsElapsed, setTotalSecondsElapsed] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
-  const [showCoach, setShowCoach] = useState<boolean>(false);
-  const [showSpotify, setShowSpotify] = useState<boolean>(true);
-  const cs = useCoachSettings();
-  const durationRef = useRef<number>(45);
-  const lastCueRef = useRef<string>('');
 
   const currentExercise = routine.exercises[currentIdx] || routine.exercises[0];
   const nextExercise = routine.exercises[currentIdx + 1];
 
   const totalExercises = routine.exercises.length;
 
-  // Initialize timer for current exercise (and let the coach introduce it)
+  // Initialize timer for current exercise
   useEffect(() => {
     if (isResting) {
       const restSec = currentExercise.restSeconds || 30;
       setTimeLeft(restSec);
       sounds.playTick();
-      const sameExercise = currentSet < currentExercise.sets;
-      coach.say(restLine(sameExercise ? currentExercise : nextExercise, sameExercise));
     } else {
       // Active exercise duration (e.g. 45s for timed, or based on reps)
       const duration = currentExercise.durationSeconds || Math.max(30, currentExercise.reps * 3);
-      durationRef.current = duration;
-      lastCueRef.current = '';
       setTimeLeft(duration);
       sounds.playGoTone();
-      coach.say(exerciseIntro(currentExercise, currentSet));
-      coach.say('Go!', { queue: true });
+      sounds.speak('Go!');
     }
   }, [currentIdx, currentSet, isResting]);
-
-  // Coach cues while the exercise is running: form tips, encouragement, last 10 seconds
-  useEffect(() => {
-    if (isPaused || isCompleted || isResting) return;
-    const total = durationRef.current;
-    const key = `${currentIdx}-${currentSet}-${timeLeft}`;
-    if (key === lastCueRef.current) return;
-    let line = '';
-    if (timeLeft === Math.floor(total * 0.7)) line = formCue(currentExercise, 0);
-    else if (timeLeft === Math.floor(total * 0.45)) line = formCue(currentExercise, 1);
-    else if (timeLeft === Math.floor(total * 0.25)) line = encouragement(currentIdx + currentSet);
-    else if (timeLeft === 10 && total > 25) line = 'Ten seconds left. Finish strong!';
-    if (line) {
-      lastCueRef.current = key;
-      coach.say(line, { queue: true });
-    }
-  }, [timeLeft, isPaused, isCompleted, isResting, currentIdx, currentSet]);
-
-  // Music + coach lifecycle
-  useEffect(() => {
-    coach.setDuckHandler((ducked) => musicPlayer.duck(ducked));
-    return () => {
-      coach.setDuckHandler(null);
-      coach.cancel();
-      musicPlayer.stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (cs.musicMode === 'builtin' && !isCompleted) musicPlayer.start(cs.trackId, cs.musicVolume);
-    else musicPlayer.stop();
-  }, [cs.musicMode, cs.trackId, isCompleted]);
-
-  useEffect(() => {
-    musicPlayer.setVolume(cs.musicVolume);
-  }, [cs.musicVolume]);
-
-  useEffect(() => {
-    if (isPaused) {
-      coach.cancel();
-      musicPlayer.pause();
-    } else if (cs.musicMode === 'builtin' && !isCompleted) {
-      musicPlayer.resume();
-    }
-  }, [isPaused]);
 
   // Main countdown timer interval
   useEffect(() => {
@@ -293,25 +228,13 @@ export const WorkoutPlayer: React.FC<WorkoutPlayerProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowCoach(true)}
-            className={`p-2 rounded-xl bg-neutral-900 transition flex items-center gap-1.5 ${
-              cs.coachEnabled || cs.musicMode !== 'off' ? 'text-orange-400' : 'text-neutral-500'
-            }`}
-            title="AI Coach & Music"
-          >
-            {cs.coachEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-            <Music className="w-5 h-5" />
-          </button>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-neutral-900 text-neutral-400 hover:text-white transition"
-            title="Exit Workout"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        <button
+          onClick={onClose}
+          className="p-2 rounded-xl bg-neutral-900 text-neutral-400 hover:text-white transition"
+          title="Exit Workout"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Main Center Area: 3D Model OR Rest Banner */}
@@ -365,7 +288,6 @@ export const WorkoutPlayer: React.FC<WorkoutPlayerProps> = ({
               animationType={currentExercise.animationType}
               characterId={characterId || currentExercise.characterId || 'CHAR-M-01'}
               avatarConfig={avatarConfig}
-              equipment={currentExercise.equipment}
               isPaused={isPaused}
               height="100%"
               showControls={false}
@@ -391,29 +313,6 @@ export const WorkoutPlayer: React.FC<WorkoutPlayerProps> = ({
           </div>
         )}
       </div>
-
-      {/* Spotify player (only when the user chose Spotify) */}
-      {cs.musicMode === 'spotify' && cs.spotifyUrl && (
-        <div className="px-4 pt-2 bg-neutral-950 border-t border-neutral-900">
-          <button
-            onClick={() => setShowSpotify((v) => !v)}
-            className="text-[11px] font-bold text-emerald-400 mb-1"
-          >
-            {showSpotify ? 'Hide Spotify' : 'Show Spotify'}
-          </button>
-          {showSpotify && (
-            <iframe
-              title="Spotify player"
-              src={cs.spotifyUrl}
-              width="100%"
-              height="152"
-              style={{ border: 0, borderRadius: 12 }}
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-            />
-          )}
-        </div>
-      )}
 
       {/* Bottom Exercise Controls & HUD */}
       <div className="px-5 py-4 border-t border-neutral-900 bg-neutral-950 space-y-4">
@@ -466,7 +365,6 @@ export const WorkoutPlayer: React.FC<WorkoutPlayerProps> = ({
           </button>
         </div>
       </div>
-      {showCoach && <CoachPanel onClose={() => setShowCoach(false)} />}
     </div>
   );
 };
