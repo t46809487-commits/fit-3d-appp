@@ -10,6 +10,8 @@ import {
 import { createPunchingBag, PunchingBag } from './punchingBag';
 import { PUNCHES } from '../../data/boxingWorkout';
 import { Loader2 } from 'lucide-react';
+import { createBoxingGlove } from './boxing/boxingThree';
+import { MOVES, isBoxingMove } from './boxing/boxingMoves';
 
 // ---------------------------------------------------------------------------
 // Auto-performing 3D boxer (same idea as Human3DModel for the other exercises):
@@ -35,6 +37,10 @@ interface Boxing3DModelProps {
   onPunchStart?: (index: number, punchNumber: number) => void;
   /** Fired every time the whole sequence has been thrown once. */
   onSequenceComplete?: () => void;
+  /** Move Lab: loop one punch / footwork / defence move instead of playing the sequence. */
+  move?: string;
+  /** Change this number to restart the current move from its first frame. */
+  restartKey?: number;
 }
 
 const FLOOR_Y = -0.905;
@@ -44,7 +50,7 @@ const START_DELAY = 0.6;  // guard time before the first punch of a drill
 const BAG_H = 0.95;
 const BAG_R = 0.17;
 const BAG_CHAIN = 0.45;
-const GLOVE_REACH = 0.08; // how far the glove sticks out past the wrist
+const GLOVE_REACH = 0.19; // how far the glove sticks out past the wrist
 const UP = new THREE.Vector3(0, 1, 0);
 
 const smoothStep = (x: number) => x * x * (3 - 2 * x);
@@ -68,13 +74,15 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
   onReady,
   onPunchStart,
   onSequenceComplete,
+  move,
+  restartKey = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Latest props for the animation loop (the loop is created only once)
-  const propsRef = useRef({ sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete });
-  propsRef.current = { sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete };
+  const propsRef = useRef({ sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete, move });
+  propsRef.current = { sequence, useBag, isPaused, speed, onReady, onPunchStart, onSequenceComplete, move };
 
   // Drill playback state
   const playRef = useRef({ cursor: -START_DELAY, lastIdx: -1, impacted: false });
@@ -90,7 +98,7 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
   } | null>(null);
 
   // A new drill (or bag on/off) restarts the sequence from the 1st punch
-  const seqKey = sequence.join(',') + '|' + (useBag ? 'bag' : 'air');
+  const seqKey = sequence.join(',') + '|' + (useBag ? 'bag' : 'air') + '|' + (move ?? '') + '|' + restartKey;
   useEffect(() => {
     playRef.current = { cursor: -START_DELAY, lastIdx: -1, impacted: false };
     bagRef.current?.bag.reset();
@@ -194,24 +202,9 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
         char = c;
         scene.add(c.scene);
 
-        // Red boxing gloves on both hands
-        const createGlove = () => {
-          const g = new THREE.Group();
-          const knuckle = new THREE.Mesh(
-            new THREE.SphereGeometry(0.085, 16, 16),
-            new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35, metalness: 0.2 })
-          );
-          knuckle.scale.set(1.0, 1.25, 0.85);
-          const cuff = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.065, 0.07, 0.06, 16),
-            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 })
-          );
-          cuff.position.y = -0.06;
-          g.add(knuckle, cuff);
-          return g;
-        };
-        getBone('LeftHand')?.add(createGlove());
-        getBone('RightHand')?.add(createGlove());
+        // Red boxing gloves on both hands (sized in metres, placed along the hand)
+        getBone('LeftHand')?.add(createBoxingGlove(c, 'L'));
+        getBone('RightHand')?.add(createBoxingGlove(c, 'R'));
 
         // ---- Measure the boxer once: which way he faces and how far each punch reaches ----
         applyExerciseKinematics(c, 'box_guard', 0, 0);
@@ -337,7 +330,16 @@ export const Boxing3DModel: React.FC<Boxing3DModelProps> = ({
         }
 
         const seq = p.sequence;
-        if (seq.length === 0 || play.cursor < 0) {
+        if (p.move && isBoxingMove(p.move)) {
+          // Move Lab: loop one move (punches are thrown out-and-back with a short guard pause)
+          const lab = Math.max(0, play.cursor + START_DELAY);
+          if (MOVES[p.move].kind === 'punch') {
+            const local = (lab % (PUNCH_TIME + 0.6)) / PUNCH_TIME;
+            applyExerciseKinematics(char, p.move, local < 1 ? punchShape(local) : 0, guardClock);
+          } else {
+            applyExerciseKinematics(char, p.move, 0, lab);
+          }
+        } else if (seq.length === 0 || play.cursor < 0) {
           applyExerciseKinematics(char, 'box_guard', 0, guardClock);
         } else {
           const n = seq.length;
