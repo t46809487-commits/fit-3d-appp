@@ -8,7 +8,8 @@ import {
   updateMuscleHighlights,
 } from './characterLoader';
 import { EXERCISE_MOTIONS } from './exercisePoses';
-import { Bone, Play, Pause, Zap, Info, ShieldCheck, Loader2 } from 'lucide-react';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { Bone, Play, Pause, Zap, Info, ShieldCheck, Loader2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface Human3DModelProps {
   primaryMuscles?: MuscleName[];
@@ -23,7 +24,7 @@ interface Human3DModelProps {
   height?: number | string;
   className?: string;
   showControls?: boolean;
-  /** Kept for compatibility. The camera is now always fixed (no drag / zoom). */
+  /** Kept for compatibility. Drag to rotate 360 degrees and the zoom / view buttons are always available. */
   interactive?: boolean;
   onMuscleClick?: (muscle: MuscleName) => void;
   onStateChange?: (state: AnimationState) => void;
@@ -36,6 +37,9 @@ interface Human3DModelProps {
 // ---------------------------------------------------------------------------
 // Fixed camera position (same 3/4 view for every exercise)
 const FIXED_CAM = { x: 1.15, y: 0.15, z: 2.75 };
+
+interface Orbit { az: number; el: number; dist: number }
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 const smoothStep = (x: number) => x * x * (3 - 2 * x);
 
@@ -121,6 +125,13 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
   const [animState, setAnimState] = useState<AnimationState>('START_POSITION');
   const [showFormCues, setShowFormCues] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadPercent, setLoadPercent] = useState<number | null>(null);
+  // The animation loop is created once per exercise, so it reads these refs to see Pause / speed changes
+  const pausedRef = useRef(internalPaused);
+  const speedRef = useRef(internalSpeed);
+  pausedRef.current = internalPaused;
+  speedRef.current = internalSpeed;
 
   useEffect(() => {
     setSelectedGender(characterId);
@@ -142,6 +153,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     skeletonHelper: THREE.SkeletonHelper | null;
     box: THREE.Box3 | null;
     lookAt: THREE.Vector3;
+    orbit: Orbit | null;
+    orbitTarget: Orbit;
+    baseOrbit: Orbit;
+    pointers: Map<number, { x: number; y: number }>;
     animTime: number;
     reqId: number | null;
   }>({
@@ -152,6 +167,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     skeletonHelper: null,
     box: null,
     lookAt: new THREE.Vector3(0, 0.05, 0),
+    orbit: null,
+    orbitTarget: { az: 0, el: 0, dist: 3 },
+    baseOrbit: { az: 0, el: 0, dist: 3 },
+    pointers: new Map(),
     animTime: 0,
     reqId: null,
   });
@@ -162,6 +181,9 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     if (!container) return;
 
     let isDisposed = false;
+    setLoadFailed(false);
+    setLoadPercent(null);
+    stateRef.current.orbit = null;
     const width = container.clientWidth || 360;
     const heightPx = container.clientHeight || 440;
 
@@ -180,6 +202,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     } catch (err) {
       console.warn('WebGL context creation failed:', err);
+      setLoadFailed(true);
       setIsLoading(false);
       return;
     }
@@ -192,6 +215,65 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       container.removeChild(container.firstChild);
     }
     container.appendChild(renderer.domElement);
+
+    // ---- 360-degree rotation (drag / swipe) and zoom (wheel / pinch) ----
+    const dom = renderer.domElement;
+    dom.style.touchAction = 'none';
+    dom.style.cursor = 'grab';
+    const pointers = stateRef.current.pointers;
+    pointers.clear();
+    const zoomBy = (f: number) => {
+      const b = stateRef.current.baseOrbit;
+      const t = stateRef.current.orbitTarget;
+      t.dist = clamp(t.dist * f, b.dist * 0.35, b.dist * 2.2);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      dom.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      dom.style.cursor = 'grabbing';
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      const prev = pointers.get(e.pointerId);
+      if (!prev) return;
+      const t = stateRef.current.orbitTarget;
+      if (pointers.size === 1) {
+        t.az -= (e.clientX - prev.x) * 0.01;
+        t.el = clamp(t.el + (e.clientY - prev.y) * 0.006, -0.15, 1.35);
+      } else if (pointers.size === 2) {
+        const others: Array<{ x: number; y: number }> = [];
+        pointers.forEach((v, id) => { if (id !== e.pointerId) others.push(v); });
+        const other = others[0];
+        if (other) {
+          const d0 = Math.hypot(prev.x - other.x, prev.y - other.y);
+          const d1 = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+          if (d1 > 0) zoomBy(d0 / d1);
+        }
+      }
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size === 0) dom.style.cursor = 'grab';
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomBy(1 + e.deltaY * 0.001);
+    };
+    dom.addEventListener('pointerdown', onPointerDown);
+    dom.addEventListener('pointermove', onPointerMove);
+    dom.addEventListener('pointerup', onPointerUp);
+    dom.addEventListener('pointercancel', onPointerUp);
+    dom.addEventListener('wheel', onWheel, { passive: false });
+
+    // Remember the framed camera as the starting orbit (used by Reset / 3-4 view)
+    const initOrbitFromCamera = () => {
+      const off = camera.position.clone().sub(stateRef.current.lookAt);
+      const dist = off.length() || 3;
+      const o: Orbit = { az: Math.atan2(off.x, off.z), el: Math.asin(clamp(off.y / dist, -1, 1)), dist };
+      stateRef.current.orbit = { ...o };
+      stateRef.current.orbitTarget = { ...o };
+      stateRef.current.baseOrbit = { ...o };
+    };
 
     // Controlled Studio Lighting (Key, Fill, Rim, Ambient)
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
@@ -381,10 +463,17 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
 
     // Load authentic connected rigged GLB character
     setIsLoading(true);
-    createCharacterInstance(selectedGender, avatarConfig)
+    createCharacterInstance(selectedGender, avatarConfig, (p) => { if (!isDisposed) setLoadPercent(Math.round(p * 100)); }, animationType)
       .then((char) => {
         if (isDisposed) return;
         scene.add(char.scene);
+
+        if (char.isRealistic) {
+          // Soft studio reflections for realistic skin / clothing, and a lighter pixel ratio for low-end devices
+          const pmrem = new THREE.PMREMGenerator(renderer);
+          scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        }
 
         // Skeleton X-Ray Helper
         const skelHelper = new THREE.SkeletonHelper(char.scene);
@@ -406,6 +495,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         exMat.visible = true;
         stateRef.current.box = box;
         stateRef.current.lookAt = fitCameraToBox(camera, box);
+        initOrbitFromCamera();
 
         // Apply initial muscle highlights
         updateMuscleHighlights(char, primaryMuscles, secondaryMuscles);
@@ -413,6 +503,7 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       })
       .catch((err) => {
         console.error('Character instantiation error:', err);
+        setLoadFailed(true);
         setIsLoading(false);
       });
 
@@ -423,7 +514,10 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      if (stateRef.current.box) stateRef.current.lookAt = fitCameraToBox(camera, stateRef.current.box);
+      if (stateRef.current.box) {
+        stateRef.current.lookAt = fitCameraToBox(camera, stateRef.current.box);
+        initOrbitFromCamera();
+      }
     };
     window.addEventListener('resize', handleResize);
 
@@ -434,8 +528,8 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       const delta = (time - lastTime) / 1000;
       lastTime = time;
 
-      if (!internalPaused) {
-        stateRef.current.animTime += delta * internalSpeed * 2.4;
+      if (!pausedRef.current) {
+        stateRef.current.animTime += delta * speedRef.current * 2.4;
       }
 
       const t = stateRef.current.animTime;
@@ -465,7 +559,20 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       } else {
         propBox.visible = false;
       }
-      // Camera is fixed for the whole exercise (position set once in fitCameraToBox)
+      // Camera orbits around the exercise (drag = 360 degrees, buttons / wheel / pinch = views and zoom)
+      const orbit = stateRef.current.orbit;
+      if (orbit) {
+        const tgt = stateRef.current.orbitTarget;
+        orbit.az += (tgt.az - orbit.az) * 0.18;
+        orbit.el += (tgt.el - orbit.el) * 0.18;
+        orbit.dist += (tgt.dist - orbit.dist) * 0.18;
+        const la = stateRef.current.lookAt;
+        camera.position.set(
+          la.x + orbit.dist * Math.cos(orbit.el) * Math.sin(orbit.az),
+          la.y + orbit.dist * Math.sin(orbit.el),
+          la.z + orbit.dist * Math.cos(orbit.el) * Math.cos(orbit.az)
+        );
+      }
       camera.lookAt(stateRef.current.lookAt);
 
       renderer.render(scene, camera);
@@ -478,6 +585,11 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
       isDisposed = true;
       if (stateRef.current.reqId) cancelAnimationFrame(stateRef.current.reqId);
       window.removeEventListener('resize', handleResize);
+      dom.removeEventListener('pointerdown', onPointerDown);
+      dom.removeEventListener('pointermove', onPointerMove);
+      dom.removeEventListener('pointerup', onPointerUp);
+      dom.removeEventListener('pointercancel', onPointerUp);
+      dom.removeEventListener('wheel', onWheel);
       renderer.dispose();
     };
   }, [animationType, selectedGender, avatarConfig, equipment.join('|')]);
@@ -497,8 +609,26 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
     }
   }, [showSkeleton]);
 
+  const restart = () => {
+    stateRef.current.animTime = 0;
+    setInternalPaused(false);
+  };
+  const setView = (v: 'front' | 'side' | '3q') => {
+    const b = stateRef.current.baseOrbit;
+    const t = stateRef.current.orbitTarget;
+    if (v === 'front') { t.az = 0; t.el = 0.12; }
+    else if (v === 'side') { t.az = Math.PI / 2; t.el = 0.1; }
+    else { t.az = b.az; t.el = b.el; }
+    t.dist = b.dist;
+  };
+  const zoomButton = (f: number) => {
+    const b = stateRef.current.baseOrbit;
+    const t = stateRef.current.orbitTarget;
+    t.dist = clamp(t.dist * f, b.dist * 0.35, b.dist * 2.2);
+  };
+
   const cycleSpeed = () => {
-    const next = internalSpeed === 1 ? 0.5 : internalSpeed === 0.5 ? 0.75 : internalSpeed === 0.75 ? 1.5 : 1;
+    const next = internalSpeed === 1 ? 0.5 : internalSpeed === 0.5 ? 0.25 : internalSpeed === 0.25 ? 1.5 : 1;
     setInternalSpeed(next);
   };
 
@@ -521,8 +651,17 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md">
           <Loader2 className="w-8 h-8 text-orange-500 animate-spin mb-2" />
           <span className="text-xs font-mono font-bold text-neutral-300 tracking-wider uppercase">
-            Loading Rigged Biomechanics Avatar...
+            Loading 3D trainer{loadPercent !== null ? ` ${loadPercent}%` : '...'}
           </span>
+        </div>
+      )}
+
+      {/* Fallback when WebGL or the model is not available */}
+      {loadFailed && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-neutral-950 text-center px-6">
+          <img src="/fallback-trainer.svg" alt="Exercise trainer" className="w-40 h-40 object-contain opacity-90" />
+          <span className="mt-3 text-xs font-semibold text-neutral-300">The interactive 3D view is not available on this device.</span>
+          <span className="text-[11px] text-neutral-500">The exercise steps and tips are still shown below.</span>
         </div>
       )}
 
@@ -542,6 +681,29 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Top Right: camera views, zoom and restart */}
+      {showControls && !loadFailed && (
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1 bg-black/75 backdrop-blur-md border border-neutral-800 rounded-2xl p-1 shadow-lg pointer-events-auto">
+          {([['front', 'Front'], ['side', 'Side'], ['3q', '3/4']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setView(id)}
+              className="px-2 py-1 text-[11px] font-bold text-neutral-300 hover:text-white hover:bg-neutral-800 rounded-xl transition"
+              title={`${label} camera`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="w-px h-4 bg-neutral-700 mx-0.5" />
+          <button onClick={() => zoomButton(0.82)} className="p-1.5 rounded-xl text-neutral-300 hover:text-white hover:bg-neutral-800 transition" title="Zoom in">
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => zoomButton(1.2)} className="p-1.5 rounded-xl text-neutral-300 hover:text-white hover:bg-neutral-800 transition" title="Zoom out">
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Form Guidance Drawer */}
       {showFormCues && (
@@ -577,6 +739,14 @@ export const Human3DModel: React.FC<Human3DModelProps> = ({
               ) : (
                 <Pause className="w-3.5 h-3.5 fill-current" />
               )}
+            </button>
+
+            <button
+              onClick={restart}
+              className="p-1.5 rounded-xl text-neutral-300 hover:text-white hover:bg-neutral-800 transition"
+              title="Restart"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
             <button
