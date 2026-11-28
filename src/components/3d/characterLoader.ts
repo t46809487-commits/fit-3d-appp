@@ -3,9 +3,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MuscleName, CharacterModelId, AvatarConfiguration } from '../../types';
 import { createAnatomicalHumanRig } from './anatomicalRig';
-import { EXERCISE_MOTIONS, MOTION_ALIAS } from "./exercisePoses";
-import { applyBoxingPose, handlesBoxing } from "./boxing/boxingThree";
+import { EXERCISE_MOTIONS, MOTION_ALIAS } from './exercisePoses';
 import { applyMotion } from './poseEngine';
+import { loadRealisticTrainer } from './realisticTrainer';
 
 export interface LoadedCharacter {
   scene: THREE.Group;
@@ -19,8 +19,16 @@ export interface LoadedCharacter {
   initialTransforms: {
     hipsPos: THREE.Vector3;
     rotations: Map<string, THREE.Euler>;
+    /** 1 cm in the hips' local units (1 for the default character). Motion data is written in cm. */
+    unit?: number;
   };
   isProceduralFallback?: boolean;
+  /** true when the realistic trainer.glb is in use */
+  isRealistic?: boolean;
+  /** AnimationMixer + clip when a real animation clip exists for the exercise */
+  mixer?: THREE.AnimationMixer;
+  clipAction?: THREE.AnimationAction;
+  clipDuration?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,8 +112,19 @@ export function loadCharacterAsset(): Promise<any> {
 // Instantiate an isolated clone of the character
 export async function createCharacterInstance(
   gender: CharacterModelId = 'CHAR-M-01',
-  avatarConfig?: AvatarConfiguration
+  avatarConfig?: AvatarConfiguration,
+  onProgress?: (p: number) => void,
+  animationType?: string
 ): Promise<LoadedCharacter> {
+  // 1) Realistic human trainer (public/models/trainer.glb), if it is installed
+  try {
+    const realistic = await loadRealisticTrainer(avatarConfig?.heightScale, onProgress, animationType);
+    if (realistic) return realistic;
+  } catch (err) {
+    console.warn('Realistic trainer unavailable, using the default character:', err);
+  }
+
+  // 2) Default character
   try {
     const gltf = await loadCharacterAsset();
 
@@ -414,6 +433,27 @@ export function resetBonesToRest(char: LoadedCharacter) {
   }
 }
 
+// Rests the lowest body part on the studio floor (used for clip-driven animation)
+const GROUND_BONES: Array<[string, number]> = [
+  ['LeftFoot', 0.05], ['RightFoot', 0.05], ['LeftToeBase', 0.03], ['RightToeBase', 0.03],
+  ['LeftHand', 0.05], ['RightHand', 0.05], ['Hips', 0.12], ['Spine2', 0.10], ['Head', 0.10],
+];
+function groundCharacter(char: LoadedCharacter) {
+  char.scene.position.set(0, 0, 0);
+  char.scene.updateMatrixWorld(true);
+  const v = new THREE.Vector3();
+  let min = Infinity;
+  GROUND_BONES.forEach(([n, r]) => {
+    const b = char.bones['mixamorig' + n];
+    if (!b) return;
+    b.getWorldPosition(v);
+    min = Math.min(min, v.y - r);
+  });
+  char.scene.position.y = isFinite(min) ? -0.905 - min : 0;
+  char.scene.updateMatrixWorld(true);
+  char.scene.userData.focusY = 0.05;
+}
+
 // Full humanoid joint kinematics driving the connected mesh
 export function applyExerciseKinematics(
   char: LoadedCharacter,
@@ -421,10 +461,16 @@ export function applyExerciseKinematics(
   phase: number, // 0 (start) to 1 (peak contraction / turnaround)
   t: number
 ) {
-  resetBonesToRest(char);
+  // Real animation clip (AnimationMixer): scrubbed with the exercise clock, so Pause / Slow-motion / Restart work
+  if (char.mixer && char.clipAction) {
+    const x = (((t / (Math.PI * 2)) % 1) + 1) % 1;
+    char.clipAction.time = x * (char.clipDuration ?? 1) * 0.999;
+    char.mixer.update(0);
+    groundCharacter(char);
+    return;
+  }
 
-  // Boxing (guard, punches, footwork, defence): IK rig with planted feet
-  if (handlesBoxing(animationType) && applyBoxingPose(char, animationType, phase, t)) return;
+  resetBonesToRest(char);
 
   // Pose-based exercises (start pose -> end pose, verified joint angles)
   // Several exercises (with different equipment) can share one motion
@@ -437,6 +483,7 @@ export function applyExerciseKinematics(
 
   const b = char.bones;
   const init = char.initialTransforms;
+  const U = init.unit ?? 1;   // 1 cm in this model's bone units
 
   // Convenient bone aliases
   const hips = b.mixamorigHips || b['mixamorig:Hips'] || b.pelvis;
@@ -466,8 +513,8 @@ export function applyExerciseKinematics(
       // 1. Controlled hip descent and hinge backward
       const descentCm = phase * 32; // 32 cm descent to parallel
       if (hips) {
-        hips.position.y = init.hipsPos.y - descentCm;
-        hips.position.z = init.hipsPos.z - phase * 6;
+        hips.position.y = init.hipsPos.y - descentCm * U;
+        hips.position.z = init.hipsPos.z - phase * 6 * U;
       }
       // 2. Torso forward inclination to preserve center of gravity
       if (spine) spine.rotation.x = phase * 0.32;
@@ -559,7 +606,7 @@ export function applyExerciseKinematics(
       char.scene.position.set(0, -0.90, 0);
       const lungeCycle = Math.sin(t * 0.85);
       const descent = Math.abs(lungeCycle) * 22;
-      if (hips) hips.position.y = init.hipsPos.y - descent;
+      if (hips) hips.position.y = init.hipsPos.y - descent * U;
       if (lUpLeg) lUpLeg.rotation.x = lungeCycle * 0.95;
       if (rUpLeg) rUpLeg.rotation.x = -lungeCycle * 0.95;
       if (lLeg) lLeg.rotation.x = Math.max(0, -lungeCycle * 1.6);
@@ -588,7 +635,7 @@ export function applyExerciseKinematics(
       char.scene.position.set(0, -0.90, 0);
       const bounce = Math.sin(t * 3.5) * 0.015;
       if (hips) {
-        hips.position.y = init.hipsPos.y + bounce;
+        hips.position.y = init.hipsPos.y + bounce * U;
         hips.rotation.y = 0.15;
       }
       // Lead left guard protecting cheek
@@ -705,7 +752,7 @@ export function applyExerciseKinematics(
       char.scene.position.set(0, -0.90, 0);
       // Hip dips and explodes upward
       if (hips) {
-        hips.position.y = init.hipsPos.y + phase * 4;
+        hips.position.y = init.hipsPos.y + phase * 4 * U;
         hips.rotation.y = 0.15 + phase * 0.35;
       }
       if (spine1) spine1.rotation.x = -phase * 0.18;
@@ -730,7 +777,7 @@ export function applyExerciseKinematics(
       // Rear leg explodes upward
       if (rUpLeg) rUpLeg.rotation.y = -phase * 0.45;
       if (hips) {
-        hips.position.y = init.hipsPos.y + phase * 4;
+        hips.position.y = init.hipsPos.y + phase * 4 * U;
         hips.rotation.y = 0.15 - phase * 0.45;
       }
       if (spine1) spine1.rotation.x = -phase * 0.18;
