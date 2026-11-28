@@ -87,6 +87,7 @@ const placementCache = new WeakMap<LoadedCharacter, WeakMap<MotionDef, Placement
 export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) {
   const bones = char.bones;
   const init = char.initialTransforms;
+  const U = init.unit ?? 1;   // 1 cm in this model's bone units (the motion data is in cm)
   const scene = char.scene;
   const getBone = (n: string) => bones['mixamorig' + n] || bones['mixamorig:' + n];
   const raise = m.raise ?? {};
@@ -113,8 +114,8 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
       if (key === 'hips') {
         const hips = getBone('Hips');
         if (hips) {
-          hips.position.y = init.hipsPos.y + (j.dy ?? 0);
-          hips.position.z = init.hipsPos.z + (j.dz ?? 0);
+          hips.position.y = init.hipsPos.y + (j.dy ?? 0) * U;
+          hips.position.z = init.hipsPos.z + (j.dz ?? 0) * U;
         }
       }
       resolveTargets(key).forEach(([name, sign]) => {
@@ -223,7 +224,18 @@ export function applyMotion(char: LoadedCharacter, m: MotionDef, phase: number) 
 
   // Final pose for this frame, with the fixed placement
   poseBody(phase);
-  scene.position.set(placement.x, placement.y, placement.z);
+  let placeY = placement.y;
+  if (m.grounded) {
+    // Floor transitions (sprawl, stand-up ...): keep the lowest body part on the floor in every phase
+    let low = Infinity;
+    Object.keys(CONTACT_RADIUS).forEach((n) => {
+      if (m.ignoreContact && m.ignoreContact.includes(n)) return;
+      const p = worldOf(n);
+      if (p) low = Math.min(low, p.y - CONTACT_RADIUS[n]);
+    });
+    if (isFinite(low)) placeY = FLOOR_Y - low;
+  }
+  scene.position.set(placement.x, placeY, placement.z);
   scene.updateMatrixWorld(true);
   scene.userData.focusY = placement.focusY;
   scene.userData.platform = placement.platform;
