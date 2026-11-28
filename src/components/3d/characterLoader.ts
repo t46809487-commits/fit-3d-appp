@@ -4,6 +4,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MuscleName, CharacterModelId, AvatarConfiguration } from '../../types';
 import { createAnatomicalHumanRig } from './anatomicalRig';
 import { EXERCISE_MOTIONS, MOTION_ALIAS } from "./exercisePoses";
+import { applyBoxingPose, handlesBoxing } from "./boxing/boxingThree";
 import { applyMotion } from './poseEngine';
 
 export interface LoadedCharacter {
@@ -421,6 +422,9 @@ export function applyExerciseKinematics(
   t: number
 ) {
   resetBonesToRest(char);
+
+  // Boxing (guard, punches, footwork, defence): IK rig with planted feet
+  if (handlesBoxing(animationType) && applyBoxingPose(char, animationType, phase, t)) return;
 
   // Pose-based exercises (start pose -> end pose, verified joint angles)
   // Several exercises (with different equipment) can share one motion
