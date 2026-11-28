@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Boxing3DModel } from '../3d/Boxing3DModel';
+import { BoxingMoveLab } from './BoxingMoveLab';
 import { BOXING_DRILLS, PUNCHES } from '../../data/boxingWorkout';
 import { sounds } from '../../utils/audio';
 import { CharacterModelId, AvatarConfiguration } from '../../types';
@@ -41,6 +42,7 @@ export const BoxingArena: React.FC<BoxingArenaProps> = ({
   const [timeLeft, setTimeLeft] = useState<number>(BOXING_DRILLS[0].durationSeconds);
   const [totalSeconds, setTotalSeconds] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [showLab, setShowLab] = useState<boolean>(false);
 
   const [activePunchPos, setActivePunchPos] = useState<number>(-1); // which punch of the sequence is being thrown now
   const [totalPunches, setTotalPunches] = useState<number>(0);
@@ -226,6 +228,8 @@ export const BoxingArena: React.FC<BoxingArenaProps> = ({
   );
 
   // --------------------------- Active screen ---------------------------
+  if (showLab) return <BoxingMoveLab onClose={() => setShowLab(false)} characterId={characterId} avatarConfig={avatarConfig} />;
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-white animate-fade-in select-none">
       {/* Top header */}
@@ -240,6 +244,12 @@ export const BoxingArena: React.FC<BoxingArenaProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setIsPaused(true); setShowLab(true); }}
+            className="px-3 py-1.5 rounded-xl bg-neutral-900 border border-red-900/50 text-xs font-black uppercase tracking-wider text-red-400 hover:text-white transition"
+          >
+            Move Lab
+          </button>
           <button
             onClick={handleEnd}
             className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-black uppercase tracking-wider text-white shadow-md transition"
